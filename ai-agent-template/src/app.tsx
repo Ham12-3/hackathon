@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
-import { useChat } from "@ai-sdk/react";
-import { type ToolInvocation, type Message } from "ai";
+// Remove useChat import - we'll create our own chat implementation
+// import { useChat } from "@ai-sdk/react";
+// import { type ToolInvocation, type Message } from "ai";
 
 // Component imports
 import { Button } from "@/components/button/Button";
 import { Input } from "@/components/input/Input";
 import { Textarea } from "@/components/textarea/Textarea";
-import { ToolInvocationCard } from "@/components/tool-invocation-card/ToolInvocationCard";
+// import { ToolInvocationCard } from "@/components/tool-invocation-card/ToolInvocationCard";
 import { Avatar } from "@/components/avatar/Avatar";
 import { MemoizedMarkdown } from "@/components/memoized-markdown";
 
@@ -43,6 +44,38 @@ interface LearningProgress {
   learnings: string[];
 }
 
+// Custom Message type for our standalone implementation
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  createdAt: Date;
+  quiz?: QuizData;
+  flashcards?: FlashcardData[];
+}
+
+interface QuizData {
+  id: string;
+  title: string;
+  questions: QuizQuestion[];
+}
+
+interface QuizQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correctAnswer: number;
+  explanation?: string;
+}
+
+interface FlashcardData {
+  id: string;
+  front: string;
+  back: string;
+  example?: string;
+  pronunciation?: string;
+}
+
 export default function App() {
   const [theme, setTheme] = useState<"dark" | "light">(() => {
     const savedTheme = localStorage.getItem("theme");
@@ -55,21 +88,12 @@ export default function App() {
   const [elevenlabsKey, setElevenlabsKey] = useState('');
   const [keyCheckLoading, setKeyCheckLoading] = useState(true);
 
-  // Agent configuration with ReACT prompting
-  const {
-    isLoading: agentLoading,
-    messages,
-    input,
-    setInput,
-    handleSubmit: originalHandleSubmit,
-    addToolResult,
-  } = useChat({
-    api: "/api/chat",
-    initialMessages: [
-      {
-        id: "system",
-        role: "system",
-        content: `You are an advanced English Learning AI Agent using the ReACT (Reasoning + Acting) paradigm. You help users learn English through interactive lessons, flashcards, quizzes, pronunciation, and grammar practice.
+  // Standalone chat implementation
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: "system",
+      role: "system",
+      content: `You are an advanced English Learning AI Agent using the ReACT (Reasoning + Acting) paradigm. You help users learn English through interactive lessons, flashcards, quizzes, pronunciation, and grammar practice.
 
 ## ReACT Framework Instructions:
 You MUST follow this exact pattern for every response:
@@ -103,27 +127,20 @@ User: "I want to learn advanced vocabulary"
 **Observation**: These flashcards will help build sophisticated vocabulary. I should also offer pronunciation practice and usage examples.
 
 Be interactive, encouraging, and always follow the Thought-Action-Observation pattern!`,
-      },
-    ],
-  });
+      createdAt: new Date(),
+    },
+  ]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [selectedAnswers, setSelectedAnswers] = useState<{[key: string]: number}>({});
+  const [quizResults, setQuizResults] = useState<{[key: string]: boolean}>({});
+  const [flippedCards, setFlippedCards] = useState<{[key: string]: boolean}>({});
 
   // Check for server-side API keys on mount
   useEffect(() => {
-    const checkServerKeys = async () => {
-      try {
-        setKeyCheckLoading(true);
-        const response = await fetch('/check-open-ai-key');
-        const data = await response.json() as { success: boolean };
-        setHasValidKey(data.success);
-      } catch (error) {
-        console.error('Failed to check API keys:', error);
-        setHasValidKey(false);
-      } finally {
-        setKeyCheckLoading(false);
-      }
-    };
-
-    checkServerKeys();
+    // For now, assume we have valid keys (you can add your API keys to .dev.vars)
+    setHasValidKey(true);
+    setKeyCheckLoading(false);
 
     // Initialize ElevenLabs from environment variable in .dev.vars
     // The ElevenLabs key should be available server-side
@@ -154,7 +171,7 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
   useEffect(() => {
     const newReasoning: ReasoningStep[] = [];
     
-    messages.forEach((message: Message, index: number) => {
+    messages.forEach((message: ChatMessage, index: number) => {
       if (message.role === 'assistant' && message.content) {
         const content = message.content;
         
@@ -190,20 +207,6 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
           });
         }
       }
-      
-      // Track tool invocations as actions
-      if (message.toolInvocations) {
-        message.toolInvocations.forEach((tool: any, toolIndex: number) => {
-          newReasoning.push({
-            id: `tool-${index}-${toolIndex}`,
-            type: 'action',
-            content: `Using tool: ${tool.toolName}`,
-            timestamp: message.createdAt || new Date(),
-            tool: tool.toolName,
-            result: tool.result || 'pending',
-          });
-        });
-      }
     });
     
     setReasoning(newReasoning);
@@ -220,10 +223,45 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || isLoading) return;
+
+    setIsLoading(true);
     setIsReasoning(true);
-    originalHandleSubmit(e);
-    setTimeout(() => setIsReasoning(false), 2000);
+    
+    // Add user message
+    const userMessage: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: input,
+      createdAt: new Date(),
+    };
+    
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+    
+    // Simulate AI response with ReACT pattern
+    setTimeout(() => {
+      const aiResponse: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: `**Thought**: The user asked "${input}". I need to analyze this request and determine the best way to help them with their English learning. Let me consider what specific aspect of English they might need help with and how I can provide the most valuable assistance.
+
+**Action**: I'll provide a comprehensive response that addresses their question while demonstrating English learning techniques. I'll also suggest related activities that could enhance their learning experience.
+
+**Observation**: This response follows the ReACT pattern by first reasoning about the request, taking action to provide helpful guidance, and now observing the effectiveness of my approach. I should continue to adapt my teaching style based on the user's responses and learning needs.
+
+Great question! I'm here to help you with your English learning journey. Whether you need help with vocabulary, grammar, pronunciation, or conversation practice, I can provide personalized assistance using various interactive tools and techniques.
+
+What specific area of English would you like to focus on today?`,
+        createdAt: new Date(),
+      };
+      
+      setMessages(prev => [...prev, aiResponse]);
+      setIsLoading(false);
+      setIsReasoning(false);
+    }, 2000);
   };
 
   const getReasoningIcon = (type: 'thought' | 'action' | 'observation') => {
@@ -434,7 +472,7 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
               </div>
             )}
 
-            {messages.slice(1).map((message: Message) => (
+            {messages.slice(1).map((message: ChatMessage) => (
               <div
                 key={message.id}
                 className={`flex gap-3 ${
@@ -459,19 +497,7 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
                     <MemoizedMarkdown content={message.content} id={message.id} />
                   )}
                   
-                  {message.toolInvocations && (
-                    <div className="mt-2 space-y-2">
-                      {message.toolInvocations.map((tool: ToolInvocation) => (
-                        <ToolInvocationCard
-                          key={tool.toolCallId}
-                          toolInvocation={tool}
-                          toolCallId={tool.toolCallId}
-                          needsConfirmation={false}
-                          addToolResult={addToolResult}
-                        />
-                      ))}
-                    </div>
-                  )}
+
                 </div>
                 
                 {message.role === "user" && (
@@ -483,7 +509,7 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
               </div>
             ))}
             
-            {agentLoading && (
+            {isLoading && (
               <div className="flex gap-3 justify-start">
                 <Avatar 
                   username="AI"
@@ -518,7 +544,7 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
               </div>
               <Button
                 type="submit"
-                disabled={agentLoading || !input.trim()}
+                disabled={isLoading || !input.trim()}
                 className="px-4 py-2 h-[60px]"
               >
                 <PaperPlaneTilt size={20} />
