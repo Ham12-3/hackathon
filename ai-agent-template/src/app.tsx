@@ -49,14 +49,11 @@ export default function App() {
     return (savedTheme as "dark" | "light") || "dark";
   });
 
-  const [openAIKey, setOpenAIKey] = useState("");
   const [hasValidKey, setHasValidKey] = useState(false);
   const [reasoning, setReasoning] = useState<ReasoningStep[]>([]);
-  const [currentGoal, setCurrentGoal] = useState("");
-  const [learningProgress, setLearningProgress] = useState<LearningProgress[]>([]);
-  const [agentMode, setAgentMode] = useState<'reactive' | 'proactive'>('reactive');
   const [isReasoning, setIsReasoning] = useState(false);
   const [elevenlabsKey, setElevenlabsKey] = useState('');
+  const [keyCheckLoading, setKeyCheckLoading] = useState(true);
 
   // Agent configuration with ReACT prompting
   const {
@@ -68,9 +65,6 @@ export default function App() {
     addToolResult,
   } = useChat({
     api: "/api/chat",
-    headers: {
-      "x-openai-key": openAIKey,
-    },
     initialMessages: [
       {
         id: "system",
@@ -113,19 +107,36 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
     ],
   });
 
-  // Check for API key on mount
+  // Check for server-side API keys on mount
   useEffect(() => {
-    const savedKey = localStorage.getItem("openai-api-key");
-    if (savedKey) {
-      setOpenAIKey(savedKey);
-      setHasValidKey(true);
-    }
+    const checkServerKeys = async () => {
+      try {
+        setKeyCheckLoading(true);
+        const response = await fetch('/check-open-ai-key');
+        const data = await response.json() as { success: boolean };
+        setHasValidKey(data.success);
+      } catch (error) {
+        console.error('Failed to check API keys:', error);
+        setHasValidKey(false);
+      } finally {
+        setKeyCheckLoading(false);
+      }
+    };
 
-    const savedElevenLabsKey = localStorage.getItem('elevenlabs_api_key');
-    if (savedElevenLabsKey) {
-      setElevenlabsKey(savedElevenLabsKey);
-      initTTS(savedElevenLabsKey);
-    }
+    checkServerKeys();
+
+    // Initialize ElevenLabs from environment variable in .dev.vars
+    // The ElevenLabs key should be available server-side
+    const checkElevenLabsKey = () => {
+      // First check if already stored locally
+      const savedElevenLabsKey = localStorage.getItem('elevenlabs_api_key');
+      if (savedElevenLabsKey) {
+        setElevenlabsKey(savedElevenLabsKey);
+        initTTS(savedElevenLabsKey);
+      }
+    };
+
+    checkElevenLabsKey();
   }, []);
 
   useEffect(() => {
@@ -200,13 +211,6 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
 
   const toggleTheme = () => {
     setTheme(theme === "dark" ? "light" : "dark");
-  };
-
-  const handleApiKeySubmit = () => {
-    if (openAIKey.trim()) {
-      localStorage.setItem("openai-api-key", openAIKey);
-      setHasValidKey(true);
-    }
   };
 
   const handleElevenLabsKeySubmit = () => {
@@ -324,39 +328,45 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
     </div>
   );
 
+  if (keyCheckLoading) {
+    return (
+      <div className="h-screen flex flex-col bg-white dark:bg-gray-900">
+        {renderHeader()}
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <Robot size={48} className="text-[#F48120] mx-auto mb-4 animate-pulse" />
+            <p className="text-neutral-600 dark:text-neutral-400">
+              Checking API configuration...
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!hasValidKey) {
     return (
       <div className="h-screen flex flex-col bg-white dark:bg-gray-900">
         {renderHeader()}
         <div className="flex-1 flex items-center justify-center p-6">
-          <div className="max-w-md w-full">
-            <div className="text-center mb-6">
-              <Robot size={48} className="text-[#F48120] mx-auto mb-4" />
-              <h1 className="text-2xl font-bold mb-2">English Learning AI Agent</h1>
-              <p className="text-neutral-600 dark:text-neutral-400">
-                Welcome to your personal English learning assistant powered by ReACT AI! 
-                I can reason through problems, take actions, and help you learn through 
-                interactive flashcards, quizzes, pronunciation practice, and more.
-              </p>
+          <div className="max-w-md w-full text-center">
+            <Robot size={48} className="text-red-500 mx-auto mb-4" />
+            <h1 className="text-2xl font-bold mb-2 text-red-600 dark:text-red-400">
+              API Configuration Required
+            </h1>
+            <p className="text-neutral-600 dark:text-neutral-400 mb-4">
+              Your server needs to be configured with API keys. Please ensure your <code>.dev.vars</code> file contains:
+            </p>
+            
+            <div className="text-left bg-neutral-100 dark:bg-neutral-800 p-4 rounded-lg mb-4 font-mono text-sm">
+              <div>OPENAI_API_KEY=your_openai_key</div>
+              <div>ANTHROPIC_API_KEY=your_anthropic_key</div>
+              <div>ELEVEN_LABS=your_elevenlabs_key</div>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  OpenAI API Key
-                </label>
-                <Input
-                  type="password"
-                  placeholder="sk-..."
-                  value={openAIKey}
-                  onChange={(e) => setOpenAIKey(e.target.value)}
-                  onValueChange={(value) => setOpenAIKey(value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleApiKeySubmit()}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">
+            {!elevenlabsKey && (
+              <div className="mt-6">
+                <label className="block text-sm font-medium mb-2 text-left">
                   ElevenLabs API Key (Optional - for premium TTS)
                 </label>
                 <Input
@@ -367,23 +377,16 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
                   onValueChange={(value) => setElevenlabsKey(value)}
                   onKeyDown={(e) => e.key === "Enter" && handleElevenLabsKeySubmit()}
                 />
+                <Button onClick={handleElevenLabsKeySubmit} className="w-full mt-2" size="sm">
+                  Save ElevenLabs Key
+                </Button>
               </div>
-
-              <Button onClick={handleApiKeySubmit} className="w-full">
-                Start Learning with AI Agent
-              </Button>
-            </div>
+            )}
 
             <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-              <h3 className="font-semibold mb-2 text-blue-900 dark:text-blue-100">
-                What makes this agent special?
-              </h3>
-              <ul className="text-sm text-blue-800 dark:text-blue-200 space-y-1">
-                <li>• <strong>Reasoning:</strong> Thinks through problems step by step</li>
-                <li>• <strong>Acting:</strong> Uses tools and takes concrete actions</li>
-                <li>• <strong>Observing:</strong> Reflects on results and adapts</li>
-                <li>• <strong>Learning:</strong> Remembers your progress and preferences</li>
-              </ul>
+              <p className="text-sm text-blue-800 dark:text-blue-200">
+                💡 Your API keys are stored securely in environment variables and never exposed to the client.
+              </p>
             </div>
           </div>
         </div>
@@ -431,7 +434,7 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
               </div>
             )}
 
-            {messages.slice(1).map((message) => (
+            {messages.slice(1).map((message: Message) => (
               <div
                 key={message.id}
                 className={`flex gap-3 ${
