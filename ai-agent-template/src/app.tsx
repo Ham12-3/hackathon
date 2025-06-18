@@ -1,47 +1,120 @@
-import { useEffect, useState, useRef, useCallback, use } from "react";
-import { useAgent } from "agents/react";
-import { useAgentChat } from "agents/ai-react";
-import type { Message } from "@ai-sdk/react";
-import type { tools } from "./tools";
+import { useEffect, useState } from "react";
 
 // Component imports
 import { Button } from "@/components/button/Button";
 import { Card } from "@/components/card/Card";
-import { Avatar } from "@/components/avatar/Avatar";
-import { Toggle } from "@/components/toggle/Toggle";
-import { Textarea } from "@/components/textarea/Textarea";
-import { MemoizedMarkdown } from "@/components/memoized-markdown";
-import { ToolInvocationCard } from "@/components/tool-invocation-card/ToolInvocationCard";
+import { Flashcard } from "@/components/flashcard/Flashcard";
+import { Quiz } from "@/components/quiz/Quiz";
 
 // Icon imports
 import {
-  Bug,
   Moon,
-  Robot,
   Sun,
-  Trash,
-  PaperPlaneTilt,
-  Stop,
+  ArrowLeft,
+  BookOpen,
+  Cards,
+  GameController,
+  SpeakerHigh,
+  TextAa,
 } from "@phosphor-icons/react";
 
-// List of tools that require human confirmation
-const toolsRequiringConfirmation: (keyof typeof tools)[] = [
-  "getWeatherInformation",
-];
+// TTS imports
+import { initTTS, getTTS } from "@/utils/textToSpeech";
 
-export default function Chat() {
+// Types
+interface FlashcardData {
+  id: string;
+  front: string;
+  back: string;
+  pronunciation?: string;
+  example?: string;
+  difficulty?: 'beginner' | 'intermediate' | 'advanced';
+  partOfSpeech?: string;
+}
+
+interface QuizQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correctAnswer: number;
+  explanation: string;
+  audioText?: string;
+}
+
+type AppMode = 'home' | 'flashcards' | 'quiz' | 'pronunciation' | 'grammar';
+
+export default function App() {
   const [theme, setTheme] = useState<"dark" | "light">(() => {
     // Check localStorage first, default to dark if not found
     const savedTheme = localStorage.getItem("theme");
     return (savedTheme as "dark" | "light") || "dark";
   });
-  const [showDebug, setShowDebug] = useState(false);
-  const [textareaHeight, setTextareaHeight] = useState("auto");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, []);
+  const [currentMode, setCurrentMode] = useState<AppMode>('home');
+  const [currentFlashcardIndex, setCurrentFlashcardIndex] = useState(0);
+  const [isCardFlipped, setIsCardFlipped] = useState(false);
+  const [elevenlabsKey, setElevenlabsKey] = useState('');
+
+  // Sample flashcards data
+  const [flashcards] = useState<FlashcardData[]>([
+    {
+      id: '1',
+      front: 'Serendipity',
+      back: 'A pleasant surprise; finding something good without looking for it',
+      pronunciation: 'ser-ən-ˈdi-pə-tē',
+      example: 'Meeting my best friend was pure serendipity.',
+      difficulty: 'advanced',
+      partOfSpeech: 'noun'
+    },
+    {
+      id: '2',
+      front: 'Eloquent',
+      back: 'Fluent and persuasive in speaking or writing',
+      pronunciation: 'ˈe-lə-kwənt',
+      example: 'She gave an eloquent speech about climate change.',
+      difficulty: 'intermediate',
+      partOfSpeech: 'adjective'
+    },
+    {
+      id: '3',
+      front: 'Ubiquitous',
+      back: 'Present, appearing, or found everywhere',
+      pronunciation: 'yo͞oˈbikwədəs',
+      example: 'Smartphones have become ubiquitous in modern society.',
+      difficulty: 'advanced',
+      partOfSpeech: 'adjective'
+    },
+  ]);
+
+  // Sample quiz data
+  const [quizQuestions] = useState<QuizQuestion[]>([
+    {
+      id: '1',
+      question: 'What does "serendipity" mean?',
+      options: [
+        'A planned discovery',
+        'A pleasant surprise or unexpected find',
+        'A type of scientific method',
+        'A musical term'
+      ],
+      correctAnswer: 1,
+      explanation: 'Serendipity refers to finding something good or useful without looking for it.',
+      audioText: 'serendipity'
+    },
+    {
+      id: '2',
+      question: 'Choose the correct pronunciation of "eloquent":',
+      options: [
+        'ee-LO-kwent',
+        'EL-o-kwent',
+        'e-LOQ-uent',
+        'el-O-kwent'
+      ],
+      correctAnswer: 1,
+      explanation: 'Eloquent is pronounced as EL-o-kwent with emphasis on the first syllable.',
+      audioText: 'eloquent'
+    }
+  ]);
 
   useEffect(() => {
     // Apply theme class on mount and when theme changes
@@ -57,400 +130,347 @@ export default function Chat() {
     localStorage.setItem("theme", theme);
   }, [theme]);
 
-  // Scroll to bottom on mount
   useEffect(() => {
-    scrollToBottom();
-  }, [scrollToBottom]);
+    // Check for existing ElevenLabs API key
+    const savedKey = localStorage.getItem('elevenlabs_api_key');
+    if (savedKey) {
+      setElevenlabsKey(savedKey);
+      initTTS(savedKey);
+    }
+  }, []);
 
   const toggleTheme = () => {
     const newTheme = theme === "dark" ? "light" : "dark";
     setTheme(newTheme);
   };
 
-  const agent = useAgent({
-    agent: "chat",
-  });
-
-  const {
-    messages: agentMessages,
-    input: agentInput,
-    handleInputChange: handleAgentInputChange,
-    handleSubmit: handleAgentSubmit,
-    addToolResult,
-    clearHistory,
-    isLoading,
-    stop,
-  } = useAgentChat({
-    agent,
-    maxSteps: 5,
-  });
-
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    agentMessages.length > 0 && scrollToBottom();
-  }, [agentMessages, scrollToBottom]);
-
-  const pendingToolCallConfirmation = agentMessages.some((m: Message) =>
-    m.parts?.some(
-      (part) =>
-        part.type === "tool-invocation" &&
-        part.toolInvocation.state === "call" &&
-        toolsRequiringConfirmation.includes(
-          part.toolInvocation.toolName as keyof typeof tools
-        )
-    )
-  );
-
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const handleSpeak = async (text: string) => {
+    const tts = getTTS();
+    if (tts) {
+      try {
+        await tts.speak(text);
+      } catch (error) {
+        console.error('TTS error:', error);
+        // Fallback to browser speech
+        if ('speechSynthesis' in window) {
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = 'en-US';
+          speechSynthesis.speak(utterance);
+        }
+      }
+    } else {
+      // Browser speech synthesis fallback
+      if ('speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'en-US';
+        speechSynthesis.speak(utterance);
+      }
+    }
   };
 
-  return (
-    <div className="h-[100vh] w-full p-4 flex justify-center items-center bg-fixed overflow-hidden">
-      <HasOpenAIKey />
-      <div className="h-[calc(100vh-2rem)] w-full mx-auto max-w-lg flex flex-col shadow-xl rounded-md overflow-hidden relative border border-neutral-300 dark:border-neutral-800">
-        <div className="px-4 py-3 border-b border-neutral-300 dark:border-neutral-800 flex items-center gap-3 sticky top-0 z-10">
-          <div className="flex items-center justify-center h-8 w-8">
-            <svg
-              width="28px"
-              height="28px"
-              className="text-[#F48120]"
-              data-icon="agents"
-            >
-              <title>Cloudflare Agents</title>
-              <symbol id="ai:local:agents" viewBox="0 0 80 79">
-                <path
-                  fill="currentColor"
-                  d="M69.3 39.7c-3.1 0-5.8 2.1-6.7 5H48.3V34h4.6l4.5-2.5c1.1.8 2.5 1.2 3.9 1.2 3.8 0 7-3.1 7-7s-3.1-7-7-7-7 3.1-7 7c0 .9.2 1.8.5 2.6L51.9 30h-3.5V18.8h-.1c-1.3-1-2.9-1.6-4.5-1.9h-.2c-1.9-.3-3.9-.1-5.8.6-.4.1-.8.3-1.2.5h-.1c-.1.1-.2.1-.3.2-1.7 1-3 2.4-4 4 0 .1-.1.2-.1.2l-.3.6c0 .1-.1.1-.1.2v.1h-.6c-2.9 0-5.7 1.2-7.7 3.2-2.1 2-3.2 4.8-3.2 7.7 0 .7.1 1.4.2 2.1-1.3.9-2.4 2.1-3.2 3.5s-1.2 2.9-1.4 4.5c-.1 1.6.1 3.2.7 4.7s1.5 2.9 2.6 4c-.8 1.8-1.2 3.7-1.1 5.6 0 1.9.5 3.8 1.4 5.6s2.1 3.2 3.6 4.4c1.3 1 2.7 1.7 4.3 2.2v-.1q2.25.75 4.8.6h.1c0 .1.1.1.1.1.9 1.7 2.3 3 4 4 .1.1.2.1.3.2h.1c.4.2.8.4 1.2.5 1.4.6 3 .8 4.5.7.4 0 .8-.1 1.3-.1h.1c1.6-.3 3.1-.9 4.5-1.9V62.9h3.5l3.1 1.7c-.3.8-.5 1.7-.5 2.6 0 3.8 3.1 7 7 7s7-3.1 7-7-3.1-7-7-7c-1.5 0-2.8.5-3.9 1.2l-4.6-2.5h-4.6V48.7h14.3c.9 2.9 3.5 5 6.7 5 3.8 0 7-3.1 7-7s-3.1-7-7-7m-7.9-16.9c1.6 0 3 1.3 3 3s-1.3 3-3 3-3-1.3-3-3 1.4-3 3-3m0 41.4c1.6 0 3 1.3 3 3s-1.3 3-3 3-3-1.3-3-3 1.4-3 3-3M44.3 72c-.4.2-.7.3-1.1.3-.2 0-.4.1-.5.1h-.2c-.9.1-1.7 0-2.6-.3-1-.3-1.9-.9-2.7-1.7-.7-.8-1.3-1.7-1.6-2.7l-.3-1.5v-.7q0-.75.3-1.5c.1-.2.1-.4.2-.7s.3-.6.5-.9c0-.1.1-.1.1-.2.1-.1.1-.2.2-.3s.1-.2.2-.3c0 0 0-.1.1-.1l.6-.6-2.7-3.5c-1.3 1.1-2.3 2.4-2.9 3.9-.2.4-.4.9-.5 1.3v.1c-.1.2-.1.4-.1.6-.3 1.1-.4 2.3-.3 3.4-.3 0-.7 0-1-.1-2.2-.4-4.2-1.5-5.5-3.2-1.4-1.7-2-3.9-1.8-6.1q.15-1.2.6-2.4l.3-.6c.1-.2.2-.4.3-.5 0 0 0-.1.1-.1.4-.7.9-1.3 1.5-1.9 1.6-1.5 3.8-2.3 6-2.3q1.05 0 2.1.3v-4.5c-.7-.1-1.4-.2-2.1-.2-1.8 0-3.5.4-5.2 1.1-.7.3-1.3.6-1.9 1s-1.1.8-1.7 1.3c-.3.2-.5.5-.8.8-.6-.8-1-1.6-1.3-2.6-.2-1-.2-2 0-2.9.2-1 .6-1.9 1.3-2.6.6-.8 1.4-1.4 2.3-1.8l1.8-.9-.7-1.9c-.4-1-.5-2.1-.4-3.1s.5-2.1 1.1-2.9q.9-1.35 2.4-2.1c.9-.5 2-.8 3-.7.5 0 1 .1 1.5.2 1 .2 1.8.7 2.6 1.3s1.4 1.4 1.8 2.3l4.1-1.5c-.9-2-2.3-3.7-4.2-4.9q-.6-.3-.9-.6c.4-.7 1-1.4 1.6-1.9.8-.7 1.8-1.1 2.9-1.3.9-.2 1.7-.1 2.6 0 .4.1.7.2 1.1.3V72zm25-22.3c-1.6 0-3-1.3-3-3 0-1.6 1.3-3 3-3s3 1.3 3 3c0 1.6-1.3 3-3 3"
-                />
-              </symbol>
-              <use href="#ai:local:agents" />
-            </svg>
-          </div>
+  const handleNextCard = () => {
+    setCurrentFlashcardIndex((prev) => (prev + 1) % flashcards.length);
+    setIsCardFlipped(false);
+  };
 
-          <div className="flex-1">
-            <h2 className="font-semibold text-base">English Learning AI</h2>
-          </div>
+  const handlePreviousCard = () => {
+    setCurrentFlashcardIndex((prev) => (prev - 1 + flashcards.length) % flashcards.length);
+    setIsCardFlipped(false);
+  };
 
-          <div className="flex items-center gap-2 mr-2">
-            <Bug size={16} />
-            <Toggle
-              toggled={showDebug}
-              aria-label="Toggle debug mode"
-              onClick={() => setShowDebug((prev) => !prev)}
-            />
-          </div>
+  const handleFlipCard = () => {
+    setIsCardFlipped(!isCardFlipped);
+  };
 
-          <Button
-            variant="ghost"
-            size="md"
-            shape="square"
-            className="rounded-full h-9 w-9"
-            onClick={toggleTheme}
-          >
-            {theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}
-          </Button>
+  const renderHeader = () => (
+    <div className="px-6 py-4 border-b border-neutral-300 dark:border-neutral-800 flex items-center gap-3 bg-white dark:bg-gray-900">
+      <div className="flex items-center justify-center h-8 w-8">
+        <BookOpen size={28} className="text-[#F48120]" />
+      </div>
 
-          <Button
-            variant="ghost"
-            size="md"
-            shape="square"
-            className="rounded-full h-9 w-9"
-            onClick={clearHistory}
-          >
-            <Trash size={20} />
-          </Button>
-        </div>
+      <div className="flex-1">
+        <h2 className="font-semibold text-base">
+          {currentMode === 'home' ? 'English Learning Hub' : 
+           currentMode === 'flashcards' ? 'Vocabulary Flashcards' :
+           currentMode === 'quiz' ? 'Quiz Challenge' :
+           currentMode === 'pronunciation' ? 'Pronunciation Practice' :
+           'Grammar Check'}
+        </h2>
+      </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-24 max-h-[calc(100vh-10rem)]">
-          {agentMessages.length === 0 && (
-            <div className="h-full flex items-center justify-center">
-              <Card className="p-6 max-w-md mx-auto bg-neutral-100 dark:bg-neutral-900">
-                <div className="text-center space-y-4">
-                  <div className="bg-[#F48120]/10 text-[#F48120] rounded-full p-3 inline-flex">
-                    <Robot size={24} />
-                  </div>
-                  <h3 className="font-semibold text-lg">Welcome to English Learning AI</h3>
-                  <p className="text-muted-foreground text-sm">
-                    Start a conversation with your AI assistant. Try asking
-                    about:
-                  </p>
-                  <ul className="text-sm text-left space-y-2">
-                    <li className="flex items-center gap-2">
-                      <span className="text-[#F48120]">•</span>
-                      <span>Create flashcards for English learning</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <span className="text-[#F48120]">•</span>
-                      <span>Generate vocabulary quizzes</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <span className="text-[#F48120]">•</span>
-                      <span>Practice pronunciation</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <span className="text-[#F48120]">•</span>
-                      <span>Check grammar and get translations</span>
-                    </li>
-                  </ul>
-                </div>
-              </Card>
-            </div>
-          )}
-
-          {agentMessages.map((m: Message, index) => {
-            const isUser = m.role === "user";
-            const showAvatar =
-              index === 0 || agentMessages[index - 1]?.role !== m.role;
-
-            return (
-              <div key={m.id}>
-                {showDebug && (
-                  <pre className="text-xs text-muted-foreground overflow-scroll">
-                    {JSON.stringify(m, null, 2)}
-                  </pre>
-                )}
-                <div
-                  className={`flex ${isUser ? "justify-end" : "justify-start"}`}
-                >
-                  <div
-                    className={`flex gap-2 max-w-[85%] ${
-                      isUser ? "flex-row-reverse" : "flex-row"
-                    }`}
-                  >
-                    {showAvatar && !isUser ? (
-                      <Avatar username={"AI"} />
-                    ) : (
-                      !isUser && <div className="w-8" />
-                    )}
-
-                    <div>
-                      <div>
-                        {m.parts?.map((part, i) => {
-                          if (part.type === "text") {
-                            return (
-                              // biome-ignore lint/suspicious/noArrayIndexKey: immutable index
-                              <div key={i}>
-                                <Card
-                                  className={`p-3 rounded-md bg-neutral-100 dark:bg-neutral-900 ${
-                                    isUser
-                                      ? "rounded-br-none"
-                                      : "rounded-bl-none border-assistant-border"
-                                  } ${
-                                    part.text.startsWith("scheduled message")
-                                      ? "border-accent/50"
-                                      : ""
-                                  } relative`}
-                                >
-                                  {part.text.startsWith(
-                                    "scheduled message"
-                                  ) && (
-                                    <span className="absolute -top-3 -left-2 text-base">
-                                      🕒
-                                    </span>
-                                  )}
-                                  <MemoizedMarkdown
-                                    id={`${m.id}-${i}`}
-                                    content={part.text.replace(
-                                      /^scheduled message: /,
-                                      ""
-                                    )}
-                                  />
-                                </Card>
-                                <p
-                                  className={`text-xs text-muted-foreground mt-1 ${
-                                    isUser ? "text-right" : "text-left"
-                                  }`}
-                                >
-                                  {formatTime(
-                                    new Date(m.createdAt as unknown as string)
-                                  )}
-                                </p>
-                              </div>
-                            );
-                          }
-
-                          if (part.type === "tool-invocation") {
-                            const toolInvocation = part.toolInvocation;
-                            const toolCallId = toolInvocation.toolCallId;
-                            const needsConfirmation =
-                              toolsRequiringConfirmation.includes(
-                                toolInvocation.toolName as keyof typeof tools
-                              );
-
-                            // Skip rendering the card in debug mode
-                            if (showDebug) return null;
-
-                            return (
-                              <ToolInvocationCard
-                                // biome-ignore lint/suspicious/noArrayIndexKey: using index is safe here as the array is static
-                                key={`${toolCallId}-${i}`}
-                                toolInvocation={toolInvocation}
-                                toolCallId={toolCallId}
-                                needsConfirmation={needsConfirmation}
-                                addToolResult={addToolResult}
-                              />
-                            );
-                          }
-                          return null;
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Input Area */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleAgentSubmit(e, {
-              data: {
-                annotations: {
-                  hello: "world",
-                },
-              },
-            });
-            setTextareaHeight("auto"); // Reset height after submission
-          }}
-          className="p-3 bg-neutral-50 absolute bottom-0 left-0 right-0 z-10 border-t border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900"
+      {currentMode !== 'home' && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setCurrentMode('home')}
         >
-          <div className="flex items-center gap-2">
-            <div className="flex-1 relative">
-              <Textarea
-                disabled={pendingToolCallConfirmation}
-                placeholder={
-                  pendingToolCallConfirmation
-                    ? "Please respond to the tool confirmation above..."
-                    : "Send a message..."
-                }
-                className="flex w-full border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-base ring-offset-background placeholder:text-neutral-500 dark:placeholder:text-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300 dark:focus-visible:ring-neutral-700 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-neutral-900 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm min-h-[24px] max-h-[calc(75dvh)] overflow-hidden resize-none rounded-2xl !text-base pb-10 dark:bg-neutral-900"
-                value={agentInput}
-                onChange={(e) => {
-                  handleAgentInputChange(e);
-                  // Auto-resize the textarea
-                  e.target.style.height = "auto";
-                  e.target.style.height = `${e.target.scrollHeight}px`;
-                  setTextareaHeight(`${e.target.scrollHeight}px`);
-                }}
-                onKeyDown={(e) => {
-                  if (
-                    e.key === "Enter" &&
-                    !e.shiftKey &&
-                    !e.nativeEvent.isComposing
-                  ) {
-                    e.preventDefault();
-                    handleAgentSubmit(e as unknown as React.FormEvent);
-                    setTextareaHeight("auto"); // Reset height on Enter submission
-                  }
-                }}
-                rows={2}
-                style={{ height: textareaHeight }}
-              />
-              <div className="absolute bottom-0 right-0 p-2 w-fit flex flex-row justify-end">
-                {isLoading ? (
-                  <button
-                    type="button"
-                    onClick={stop}
-                    className="inline-flex items-center cursor-pointer justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-1.5 h-fit border border-neutral-200 dark:border-neutral-800"
-                    aria-label="Stop generation"
-                  >
-                    <Stop size={16} />
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    className="inline-flex items-center cursor-pointer justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-1.5 h-fit border border-neutral-200 dark:border-neutral-800"
-                    disabled={pendingToolCallConfirmation || !agentInput.trim()}
-                    aria-label="Send message"
-                  >
-                    <PaperPlaneTilt size={16} />
-                  </button>
-                )}
+          <ArrowLeft size={16} />
+          Back
+        </Button>
+      )}
+
+      <Button
+        variant="ghost"
+        size="md"
+        shape="square"
+        className="rounded-full h-9 w-9"
+        onClick={toggleTheme}
+      >
+        {theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}
+      </Button>
+    </div>
+  );
+
+  const renderHomeContent = () => (
+    <div className="p-6">
+      <div className="text-center mb-8">
+        <div className="text-6xl mb-4">📚</div>
+        <h1 className="text-3xl font-bold mb-2">English Learning Hub</h1>
+        <p className="text-gray-600 dark:text-gray-400">
+          Master English with interactive learning tools and AI-powered features.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+        <div 
+          className="cursor-pointer transform hover:scale-105"
+          onClick={() => setCurrentMode('flashcards')}
+        >
+          <Card className="p-6 hover:shadow-lg transition-all duration-200">
+            <div className="text-center space-y-4">
+              <div className="text-5xl text-blue-600">
+                <Cards size={48} />
+              </div>
+              <h3 className="text-xl font-semibold">Flashcards</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Study vocabulary with interactive swipeable flashcards
+              </p>
+              <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded text-xs text-blue-600 dark:text-blue-400">
+                {flashcards.length} cards available • Swipe to navigate
               </div>
             </div>
+          </Card>
+        </div>
+
+        <div 
+          className="cursor-pointer transform hover:scale-105"
+          onClick={() => setCurrentMode('quiz')}
+        >
+          <Card className="p-6 hover:shadow-lg transition-all duration-200">
+            <div className="text-center space-y-4">
+              <div className="text-5xl text-green-600">
+                <GameController size={48} />
+              </div>
+              <h3 className="text-xl font-semibold">Interactive Quiz</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Test your knowledge with timed multiple-choice questions
+              </p>
+              <div className="bg-green-50 dark:bg-green-900/20 p-2 rounded text-xs text-green-600 dark:text-green-400">
+                {quizQuestions.length} questions • Audio support
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        <div 
+          className="cursor-pointer transform hover:scale-105"
+          onClick={() => setCurrentMode('pronunciation')}
+        >
+          <Card className="p-6 hover:shadow-lg transition-all duration-200">
+            <div className="text-center space-y-4">
+              <div className="text-5xl text-purple-600">
+                <SpeakerHigh size={48} />
+              </div>
+              <h3 className="text-xl font-semibold">Pronunciation</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Practice pronunciation with high-quality text-to-speech
+              </p>
+              <div className="bg-purple-50 dark:bg-purple-900/20 p-2 rounded text-xs text-purple-600 dark:text-purple-400">
+                {elevenlabsKey ? 'ElevenLabs enabled' : 'Browser TTS'} • Click to speak
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        <div 
+          className="cursor-pointer transform hover:scale-105"
+          onClick={() => setCurrentMode('grammar')}
+        >
+          <Card className="p-6 hover:shadow-lg transition-all duration-200">
+            <div className="text-center space-y-4">
+              <div className="text-5xl text-orange-600">
+                <TextAa size={48} />
+              </div>
+              <h3 className="text-xl font-semibold">Grammar & Tools</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Check grammar, get translations, and language tools
+              </p>
+              <div className="bg-orange-50 dark:bg-orange-900/20 p-2 rounded text-xs text-orange-600 dark:text-orange-400">
+                AI-powered • Instant feedback
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
+
+      {/* ElevenLabs API Key Section */}
+      <div className="mt-8 max-w-md mx-auto">
+        <Card className="p-6 bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800">
+          <div className="text-center">
+            <div className="text-yellow-600 dark:text-yellow-400 mb-2">🔑 Pro Tip</div>
+            <p className="text-sm text-yellow-800 dark:text-yellow-200 mb-3">
+              Add your ElevenLabs API key for premium text-to-speech quality!
+            </p>
+            <input
+              type="password"
+              placeholder="Enter ElevenLabs API key..."
+              value={elevenlabsKey}
+              onChange={(e) => setElevenlabsKey(e.target.value)}
+              className="w-full p-2 text-sm border rounded dark:bg-gray-800 dark:border-gray-600"
+            />
+            <Button
+              size="sm"
+              className="mt-2 w-full"
+              onClick={() => {
+                if (elevenlabsKey.trim()) {
+                  localStorage.setItem('elevenlabs_api_key', elevenlabsKey);
+                  initTTS(elevenlabsKey);
+                  alert('ElevenLabs API key saved!');
+                }
+              }}
+            >
+              Save API Key
+            </Button>
           </div>
-        </form>
+        </Card>
       </div>
     </div>
   );
-}
 
-const hasOpenAiKeyPromise = fetch("/check-open-ai-key").then((res) =>
-  res.json<{ success: boolean }>()
-);
+  const renderFlashcardsContent = () => (
+    <div className="p-6">
+      <Flashcard
+        cards={flashcards}
+        currentIndex={currentFlashcardIndex}
+        onNext={handleNextCard}
+        onPrevious={handlePreviousCard}
+        onFlip={handleFlipCard}
+        isFlipped={isCardFlipped}
+        onSpeak={handleSpeak}
+      />
+    </div>
+  );
 
-function HasOpenAIKey() {
-  const hasOpenAiKey = use(hasOpenAiKeyPromise);
+  const renderQuizContent = () => (
+    <div className="p-6">
+      <Quiz
+        questions={quizQuestions}
+        onSpeak={handleSpeak}
+        onComplete={(score, results) => {
+          console.log('Quiz completed with score:', score, 'Results:', results);
+          // You can add more completion logic here like saving results
+        }}
+      />
+    </div>
+  );
 
-  if (!hasOpenAiKey.success) {
-    return (
-      <div className="fixed top-0 left-0 right-0 z-50 bg-red-500/10 backdrop-blur-sm">
-        <div className="max-w-3xl mx-auto p-4">
-          <div className="bg-white dark:bg-neutral-900 rounded-lg shadow-lg border border-red-200 dark:border-red-900 p-4">
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-full">
-                <svg
-                  className="w-5 h-5 text-red-600 dark:text-red-400"
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-labelledby="warningIcon"
+  const renderPronunciationContent = () => (
+    <div className="p-6 max-w-2xl mx-auto">
+      <Card className="p-8 text-center">
+        <div className="text-6xl mb-4">🎤</div>
+        <h3 className="text-2xl font-semibold mb-4">Pronunciation Practice</h3>
+        <p className="text-gray-600 dark:text-gray-400 mb-6">
+          Practice pronouncing English words and phrases with audio feedback.
+        </p>
+        
+        <div className="space-y-4">
+          {flashcards.slice(0, 3).map((card) => (
+            <div key={card.id} className="border rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div className="text-left">
+                  <div className="font-semibold">{card.front}</div>
+                  {card.pronunciation && (
+                    <div className="text-sm text-blue-600 dark:text-blue-400">
+                      /{card.pronunciation}/
+                    </div>
+                  )}
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => handleSpeak(card.front)}
                 >
-                  <title id="warningIcon">Warning Icon</title>
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" y2="12" />
-                  <line x1="12" y1="16" x2="12.01" y2="16" />
-                </svg>
-              </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-semibold text-red-600 dark:text-red-400 mb-2">
-                  OpenAI API Key Not Configured
-                </h3>
-                <p className="text-neutral-600 dark:text-neutral-300 mb-1">
-                  Requests to the API, including from the frontend UI, will not
-                  work until an OpenAI API key is configured.
-                </p>
-                <p className="text-neutral-600 dark:text-neutral-300">
-                  Please configure an OpenAI API key by setting a{" "}
-                  <a
-                    href="https://developers.cloudflare.com/workers/configuration/secrets/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-red-600 dark:text-red-400"
-                  >
-                    secret
-                  </a>{" "}
-                  named{" "}
-                  <code className="bg-red-100 dark:bg-red-900/30 px-1.5 py-0.5 rounded text-red-600 dark:text-red-400 font-mono text-sm">
-                    OPENAI_API_KEY
-                  </code>
-                  . <br />
-                  You can also use a different model provider by following these{" "}
-                  <a
-                    href="https://github.com/cloudflare/agents-starter?tab=readme-ov-file#use-a-different-ai-model-provider"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-red-600 dark:text-red-400"
-                  >
-                    instructions.
-                  </a>
-                </p>
+                  <SpeakerHigh size={16} />
+                  Speak
+                </Button>
               </div>
             </div>
+          ))}
+        </div>
+
+        <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+          <p className="text-sm text-blue-800 dark:text-blue-200">
+            💡 Try different words and listen to the pronunciation. 
+            {elevenlabsKey ? ' Using premium ElevenLabs voice!' : ' Using browser speech synthesis.'}
+          </p>
+        </div>
+      </Card>
+    </div>
+  );
+
+  const renderGrammarContent = () => (
+    <div className="p-6 max-w-2xl mx-auto">
+      <Card className="p-8 text-center">
+        <div className="text-6xl mb-4">📝</div>
+        <h3 className="text-2xl font-semibold mb-4">Grammar & Language Tools</h3>
+        <p className="text-gray-600 dark:text-gray-400 mb-6">
+          Check grammar, get translations, and improve your English writing.
+        </p>
+
+        <div className="space-y-4 text-left">
+          <div className="border rounded-lg p-4">
+            <h4 className="font-semibold mb-2">Grammar Check</h4>
+            <textarea
+              className="w-full p-3 border rounded dark:bg-gray-800 dark:border-gray-600"
+              rows={3}
+              placeholder="Type a sentence to check grammar..."
+            />
+            <Button className="mt-2 w-full">Check Grammar</Button>
+          </div>
+
+          <div className="border rounded-lg p-4">
+            <h4 className="font-semibold mb-2">Translation</h4>
+            <input
+              type="text"
+              className="w-full p-3 border rounded dark:bg-gray-800 dark:border-gray-600"
+              placeholder="Enter text to translate..."
+            />
+            <Button className="mt-2 w-full">Translate</Button>
           </div>
         </div>
+
+        <div className="mt-6 p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+          <p className="text-sm text-orange-800 dark:text-orange-200">
+            🚧 These tools are currently in development. More features coming soon!
+          </p>
+        </div>
+      </Card>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="max-w-6xl mx-auto">
+        {renderHeader()}
+        
+        <div className="min-h-[calc(100vh-80px)]">
+          {currentMode === 'home' && renderHomeContent()}
+          {currentMode === 'flashcards' && renderFlashcardsContent()}
+          {currentMode === 'quiz' && renderQuizContent()}
+          {currentMode === 'pronunciation' && renderPronunciationContent()}
+          {currentMode === 'grammar' && renderGrammarContent()}
+        </div>
       </div>
-    );
-  }
-  return null;
+    </div>
+  );
 }
