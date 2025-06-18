@@ -1,0 +1,363 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Language Learning Tutor with MCP & Fiberplane - Cursor Rules
+
+<system_context>
+You are an expert assistant building a language-learning tutor using:
+- Cloudflare Workers with Hono framework
+- Model Context Protocol (MCP) for AI tool integration  
+- Fiberplane for development and debugging
+- Cloudflare Agents SDK for AI agent functionality
+- React frontend with modern UI patterns
+</system_context>
+
+<project_overview>
+Building a conversational AI language tutor with:
+1. **Remote MCP Server** - Hosted on Cloudflare Workers with OAuth authentication
+2. **AI Tutor Agent** - Uses Cloudflare Agents SDK with MCP client capabilities  
+3. **Language Learning Tools** - Flashcards, grammar checking, translation, quizzes
+4. **Session Management** - Durable Objects for persistent learning progress
+5. **Modern UI** - React frontend with Fiberplane integration
+</project_overview>
+
+<behavior_guidelines>
+- Follow the existing Cloudflare Workers best practices from cloudflare.mdc
+- Prioritize MCP-first architecture for tool integration
+- Use Fiberplane for development iteration and debugging
+- Build with OAuth security from day one
+- Focus on educational effectiveness and user experience
+- Implement proper error handling and graceful degradation
+</behavior_guidelines>
+
+<mcp_guidelines>
+
+## MCP Server Development
+- **Remote Transport**: Use Server-Sent Events (SSE) or HTTP for remote MCP communication
+- **Tool Definition**: Create semantic, educational-focused tools with clear schemas
+- **Authentication**: Implement OAuth 2.0 flow using Cloudflare's workers-oauth-provider
+- **State Management**: Use Durable Objects for persistent learning sessions
+- **Tool Examples**:
+  ```typescript
+  const tools = {
+    getTodayWord: { description: "Get daily vocabulary word with example" },
+    grammarCheck: { description: "Check grammar and suggest corrections" },
+    translate: { description: "Translate text between languages" },
+    quizMe: { description: "Generate quiz based on learning level" },
+    trackProgress: { description: "Update and retrieve learning progress" }
+  }
+  ```
+
+## MCP Client Integration  
+- Use Cloudflare Agents SDK with MCPClientManager for dynamic tool discovery
+- Implement tool authentication flow with user consent
+- Cache tool schemas for performance
+- Handle tool failures gracefully with fallback responses
+
+## MCP Best Practices
+- Design tools to be stateless where possible
+- Use descriptive tool names and parameter schemas
+- Implement proper error codes and messages
+- Support batch operations for efficiency
+- Version your MCP server APIs properly
+</mcp_guidelines>
+
+<fiberplane_integration>
+
+## Development Workflow
+- Use Fiberplane Codegen to scaffold MCP server endpoints
+- Leverage Fiberplane Playgrounds for:
+  - Interactive API testing of Hono endpoints
+  - Real-time agent state visualization  
+  - MCP tool call debugging and inspection
+  - OAuth flow testing and validation
+
+## Monitoring & Debugging
+- Use `@fiberplane/hono` for embedded API explorer
+- Use `@fiberplane/agents` for agent state visualization
+- Implement structured logging for MCP interactions
+- Track learning analytics and user engagement metrics
+
+## Local Development  
+- Hot reload for rapid iteration on language learning features
+- Mock MCP responses for offline development
+- Test OAuth flows locally with dev credentials
+- Validate tool schemas before deployment
+</fiberplane_integration>
+
+<hono_framework_patterns>
+
+## API Structure
+```typescript
+import { Hono } from 'hono'
+import { cors } from 'hono/cors'
+import { logger } from 'hono/logger'
+
+const app = new Hono<{ Bindings: Env }>()
+
+// Middleware
+app.use('*', cors())
+app.use('*', logger())
+
+// MCP endpoints
+app.get('/mcp/tools', listTools)
+app.post('/mcp/tools/:toolName', executeTool)
+
+// OAuth endpoints  
+app.get('/auth/oauth', initiateOAuth)
+app.get('/auth/callback', handleOAuthCallback)
+
+// Learning endpoints
+app.get('/progress/:userId', getProgress)
+app.post('/progress/:userId', updateProgress)
+```
+
+## Error Handling
+- Use Hono's error handling middleware
+- Return structured error responses for MCP tools
+- Implement retry logic for external API calls
+- Log errors with context for debugging
+
+## Security
+- Validate all MCP tool parameters with Zod schemas
+- Implement rate limiting for tool calls
+- Sanitize user inputs for language learning content
+- Use secure OAuth state parameters
+</hono_framework_patterns>
+
+<agent_development>
+
+## Agent Architecture
+```typescript
+import { Agent } from '@cloudflare/agents'
+import { MCPClientManager } from '@cloudflare/agents-sdk'
+
+class LanguageTutorAgent extends Agent<Env, LearningState> {
+  private mcpClient: MCPClientManager
+
+  async onStart() {
+    this.mcpClient = new MCPClientManager({
+      serverUrl: this.env.MCP_SERVER_URL,
+      authToken: await this.getAuthToken()
+    })
+    await this.mcpClient.connect()
+  }
+
+  async onMessage(message: string) {
+    // Analyze learning intent
+    const intent = await this.analyzeIntent(message)
+    
+    // Use appropriate MCP tool
+    const response = await this.mcpClient.callTool(intent.tool, intent.params)
+    
+    // Update learning state
+    await this.setState({ ...this.state, lastActivity: Date.now() })
+    
+    return this.formatResponse(response)
+  }
+}
+```
+
+## State Management
+- Use `this.setState()` for learning progress and preferences
+- Use `this.sql()` for complex learning analytics queries
+- Implement session persistence across conversations
+- Track learning metrics and adapt difficulty
+
+## Tool Integration
+- Discover MCP tools dynamically on agent startup
+- Cache tool schemas for performance
+- Handle tool authentication seamlessly
+- Provide fallback responses when tools are unavailable
+</agent_development>
+
+<learning_features>
+
+## Educational Tools
+```typescript
+// Vocabulary building
+interface VocabularyTool {
+  getWordOfDay(): Promise<{ word: string, definition: string, example: string }>
+  searchWords(difficulty: 'beginner' | 'intermediate' | 'advanced'): Promise<Word[]>
+  createFlashcards(words: string[]): Promise<Flashcard[]>
+}
+
+// Grammar assistance  
+interface GrammarTool {
+  checkGrammar(text: string): Promise<GrammarResult>
+  explainRule(ruleId: string): Promise<Explanation>
+  generateExercises(topic: string): Promise<Exercise[]>
+}
+
+// Translation services
+interface TranslationTool {
+  translate(text: string, from: string, to: string): Promise<Translation>
+  detectLanguage(text: string): Promise<LanguageDetection>
+  getContextualExamples(word: string, language: string): Promise<Example[]>
+}
+```
+
+## Progress Tracking
+- Learning streaks and milestones
+- Difficulty adaptation based on performance
+- Spaced repetition algorithms for vocabulary
+- Personal learning analytics and insights
+
+## Content Personalization
+- Adapt to user's learning style and pace
+- Generate content based on interests and goals
+- Provide contextual cultural information
+- Support multiple learning languages
+</learning_features>
+
+<deployment_configuration>
+
+## Wrangler Configuration
+```jsonc
+{
+  "name": "language-tutor-mcp",
+  "main": "src/index.ts", 
+  "compatibility_date": "2025-02-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "LANGUAGE_TUTOR_AGENT",
+        "class_name": "LanguageTutorAgent"
+      },
+      {
+        "name": "LEARNING_SESSIONS", 
+        "class_name": "LearningSession"
+      }
+    ]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "USER_PROFILES",
+      "id": "your-kv-namespace-id"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "LEARNING_ANALYTICS",
+      "database_name": "learning_analytics",
+      "database_id": "your-d1-database-id"
+    }
+  ],
+  "vars": {
+    "MCP_SERVER_URL": "https://your-mcp-server.workers.dev/sse",
+    "SUPPORTED_LANGUAGES": "en,es,fr,de,it,pt,zh,ja"
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["LanguageTutorAgent", "LearningSession"]
+    }
+  ]
+}
+```
+
+## Environment Variables
+- `OAUTH_CLIENT_ID`: OAuth application client ID
+- `OAUTH_CLIENT_SECRET`: OAuth application secret  
+- `MCP_SERVER_URL`: Remote MCP server endpoint
+- `AI_API_KEY`: AI service API key (if using external AI)
+- `ENCRYPTION_KEY`: For sensitive user data encryption
+</deployment_configuration>
+
+<testing_guidelines>
+
+## MCP Testing
+- Test tool discovery and schema validation
+- Verify OAuth flows with mock providers
+- Test tool execution with various parameters
+- Validate error handling and retries
+
+## Agent Testing  
+- Test learning conversation flows
+- Verify state persistence across sessions
+- Test tool integration and fallbacks
+- Validate progress tracking accuracy
+
+## Frontend Testing
+- Test Fiberplane Playground integration
+- Verify real-time agent state updates
+- Test OAuth user experience
+- Validate responsive design across devices
+
+## Performance Testing
+- Load test MCP tool execution
+- Test cold start performance
+- Validate Durable Object hibernation
+- Monitor learning session scalability
+</testing_guidelines>
+
+<security_considerations>
+
+## Data Privacy
+- Encrypt sensitive learning data
+- Implement proper data retention policies  
+- Support user data export and deletion
+- Comply with educational privacy regulations (FERPA, COPPA)
+
+## Authentication Security
+- Use secure OAuth 2.0 flows
+- Implement proper session management
+- Validate all MCP tool permissions
+- Rate limit API calls per user
+
+## Content Security
+- Sanitize all user-generated learning content
+- Validate language learning materials
+- Implement content moderation for user inputs
+- Protect against prompt injection attacks
+</security_considerations>
+
+<performance_optimization>
+
+## MCP Performance
+- Cache tool schemas and responses where appropriate
+- Implement connection pooling for MCP clients
+- Use batch operations for multiple tool calls
+- Optimize tool parameter serialization
+
+## Learning Data
+- Use efficient data structures for vocabulary storage
+- Implement lazy loading for large learning datasets
+- Cache frequently accessed learning materials
+- Optimize spaced repetition algorithms
+
+## Frontend Performance  
+- Lazy load learning components
+- Implement virtual scrolling for large vocabulary lists
+- Cache learning progress locally
+- Optimize bundle size with code splitting
+</performance_optimization>
+
+<monitoring_observability>
+
+## Learning Analytics
+- Track learning session duration and engagement
+- Monitor tool usage patterns and effectiveness
+- Measure learning progress and retention rates
+- Analyze user learning preferences and behavior
+
+## Technical Metrics
+- Monitor MCP server response times and errors
+- Track agent memory usage and hibernation patterns
+- Monitor OAuth success rates and failures
+- Track API rate limits and quota usage
+
+## User Experience
+- Monitor learning goal completion rates
+- Track user satisfaction and feedback
+- Analyze learning streak maintenance
+- Monitor feature adoption and usage patterns
+</monitoring_observability>
+

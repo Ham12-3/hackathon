@@ -1,0 +1,582 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Hono Framework Integration - Cursor Rules
+
+<system_context>
+You are building APIs and server-side logic using the Hono web framework on Cloudflare Workers for the language learning tutor project.
+</system_context>
+
+<hono_core_principles>
+
+## Framework Philosophy
+- Hono is lightweight, fast, and edge-optimized
+- Use TypeScript for all Hono applications
+- Leverage Hono's middleware ecosystem
+- Build composable and reusable handlers
+- Follow RESTful API design principles
+
+## Essential Imports
+```typescript
+import { Hono } from 'hono'
+import { cors } from 'hono/cors'
+import { logger } from 'hono/logger'
+import { prettyJSON } from 'hono/pretty-json'
+import { secureHeaders } from 'hono/secure-headers'
+import { validator } from 'hono/validator'
+import { zValidator } from '@hono/zod-validator'
+```
+</hono_core_principles>
+
+<app_structure>
+
+## Basic App Setup
+```typescript
+import { Hono } from 'hono'
+
+interface Env {
+  // Cloudflare bindings
+  LANGUAGE_TUTOR_AGENT: DurableObjectNamespace
+  USER_PROFILES: KVNamespace
+  LEARNING_ANALYTICS: D1Database
+  // Environment variables
+  OAUTH_CLIENT_ID: string
+  OAUTH_CLIENT_SECRET: string
+  MCP_SERVER_URL: string
+}
+
+const app = new Hono<{ Bindings: Env }>()
+
+// Global middleware
+app.use('*', cors({
+  origin: ['http://localhost:3000', 'https://your-domain.com'],
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}))
+
+app.use('*', logger())
+app.use('*', secureHeaders())
+app.use('*', prettyJSON())
+
+export default app
+```
+
+## Route Organization
+```typescript
+// Separate route files for different concerns
+import { authRoutes } from './routes/auth'
+import { mcpRoutes } from './routes/mcp'
+import { learningRoutes } from './routes/learning'
+import { userRoutes } from './routes/user'
+
+// Mount route groups
+app.route('/auth', authRoutes)
+app.route('/mcp', mcpRoutes)
+app.route('/learning', learningRoutes)
+app.route('/user', userRoutes)
+```
+</app_structure>
+
+<middleware_patterns>
+
+## Authentication Middleware
+```typescript
+import { createMiddleware } from 'hono/factory'
+
+export const authMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next) => {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '')
+  
+  if (!token) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
+  const user = await c.env.USER_PROFILES.get(`user:${token}`)
+  if (!user) {
+    return c.json({ error: 'Invalid token' }, 401)
+  }
+
+  c.set('user', JSON.parse(user))
+  await next()
+})
+```
+
+## Rate Limiting Middleware
+```typescript
+export const rateLimitMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next) => {
+  const ip = c.req.header('CF-Connecting-IP') || 'unknown'
+  const key = `rate_limit:${ip}`
+  
+  const current = await c.env.USER_PROFILES.get(key)
+  const count = current ? parseInt(current) : 0
+  
+  if (count >= 100) { // 100 requests per minute
+    return c.json({ error: 'Rate limit exceeded' }, 429)
+  }
+  
+  await c.env.USER_PROFILES.put(key, (count + 1).toString(), { expirationTtl: 60 })
+  await next()
+})
+```
+
+## Validation Middleware
+```typescript
+import { z } from 'zod'
+
+const learningRequestSchema = z.object({
+  text: z.string().min(1).max(1000),
+  language: z.enum(['en', 'es', 'fr', 'de', 'it', 'pt', 'zh', 'ja']),
+  difficulty: z.enum(['beginner', 'intermediate', 'advanced']).optional()
+})
+
+// Use with zValidator
+app.post('/learning/check-grammar', 
+  zValidator('json', learningRequestSchema),
+  async (c) => {
+    const { text, language, difficulty } = c.req.valid('json')
+    // Handler logic here
+  }
+)
+```
+</middleware_patterns>
+
+<mcp_integration>
+
+## MCP Tool Endpoints
+```typescript
+import { Hono } from 'hono'
+
+const mcpRoutes = new Hono<{ Bindings: Env }>()
+
+// List available MCP tools
+mcpRoutes.get('/tools', async (c) => {
+  return c.json({
+    tools: [
+      {
+        name: 'getTodayWord',
+        description: 'Get daily vocabulary word with example',
+        parameters: {
+          type: 'object',
+          properties: {
+            language: { type: 'string', enum: ['en', 'es', 'fr'] }
+          },
+          required: ['language']
+        }
+      },
+      {
+        name: 'grammarCheck',
+        description: 'Check grammar and suggest corrections',
+        parameters: {
+          type: 'object',
+          properties: {
+            text: { type: 'string', maxLength: 1000 },
+            language: { type: 'string', enum: ['en', 'es', 'fr'] }
+          },
+          required: ['text', 'language']
+        }
+      }
+    ]
+  })
+})
+
+// Execute MCP tool
+mcpRoutes.post('/tools/:toolName', 
+  authMiddleware,
+  zValidator('json', z.object({
+    parameters: z.record(z.any())
+  })),
+  async (c) => {
+    const toolName = c.req.param('toolName')
+    const { parameters } = c.req.valid('json')
+    
+    try {
+      const result = await executeMCPTool(toolName, parameters, c.env)
+      return c.json({ result })
+    } catch (error) {
+      return c.json({ error: error.message }, 400)
+    }
+  }
+)
+
+export { mcpRoutes }
+```
+
+## Tool Implementation
+```typescript
+async function executeMCPTool(toolName: string, parameters: any, env: Env) {
+  switch (toolName) {
+    case 'getTodayWord':
+      return await getTodayWord(parameters.language, env)
+    
+    case 'grammarCheck':
+      return await checkGrammar(parameters.text, parameters.language, env)
+      
+    case 'translate':
+      return await translateText(parameters.text, parameters.from, parameters.to, env)
+      
+    default:
+      throw new Error(`Unknown tool: ${toolName}`)
+  }
+}
+```
+</mcp_integration>
+
+<learning_api_routes>
+
+## User Progress Routes
+```typescript
+const learningRoutes = new Hono<{ Bindings: Env }>()
+
+// Get user learning progress
+learningRoutes.get('/progress', authMiddleware, async (c) => {
+  const user = c.get('user')
+  
+  const progress = await c.env.LEARNING_ANALYTICS
+    .prepare('SELECT * FROM user_progress WHERE user_id = ?')
+    .bind(user.id)
+    .first()
+    
+  return c.json({ progress })
+})
+
+// Update learning progress
+learningRoutes.post('/progress', 
+  authMiddleware,
+  zValidator('json', z.object({
+    activity: z.string(),
+    score: z.number().min(0).max(100),
+    duration: z.number().positive()
+  })),
+  async (c) => {
+    const user = c.get('user')
+    const { activity, score, duration } = c.req.valid('json')
+    
+    await c.env.LEARNING_ANALYTICS
+      .prepare('INSERT INTO learning_activities (user_id, activity, score, duration, created_at) VALUES (?, ?, ?, ?, ?)')
+      .bind(user.id, activity, score, duration, new Date().toISOString())
+      .run()
+      
+    return c.json({ success: true })
+  }
+)
+
+// Get vocabulary flashcards
+learningRoutes.get('/flashcards/:language', authMiddleware, async (c) => {
+  const language = c.req.param('language')
+  const user = c.get('user')
+  
+  const flashcards = await c.env.LEARNING_ANALYTICS
+    .prepare('SELECT * FROM flashcards WHERE language = ? AND user_id = ? ORDER BY next_review ASC LIMIT 10')
+    .bind(language, user.id)
+    .all()
+    
+  return c.json({ flashcards: flashcards.results })
+})
+
+export { learningRoutes }
+```
+
+## Quiz Generation Routes
+```typescript
+learningRoutes.post('/quiz/generate',
+  authMiddleware,
+  zValidator('json', z.object({
+    language: z.string(),
+    difficulty: z.enum(['beginner', 'intermediate', 'advanced']),
+    topic: z.string().optional(),
+    count: z.number().min(1).max(20).default(10)
+  })),
+  async (c) => {
+    const { language, difficulty, topic, count } = c.req.valid('json')
+    
+    // Generate quiz using MCP tool or AI service
+    const quiz = await generateQuiz({
+      language,
+      difficulty,
+      topic,
+      questionCount: count
+    }, c.env)
+    
+    return c.json({ quiz })
+  }
+)
+```
+</learning_api_routes>
+
+<oauth_integration>
+
+## OAuth Flow Implementation
+```typescript
+const authRoutes = new Hono<{ Bindings: Env }>()
+
+// Initiate OAuth flow
+authRoutes.get('/oauth/github', async (c) => {
+  const state = crypto.randomUUID()
+  const redirectUri = `${c.req.url.split('/auth')[0]}/auth/oauth/callback`
+  
+  // Store state for verification
+  await c.env.USER_PROFILES.put(`oauth_state:${state}`, 'pending', { expirationTtl: 600 })
+  
+  const authUrl = new URL('https://github.com/login/oauth/authorize')
+  authUrl.searchParams.set('client_id', c.env.OAUTH_CLIENT_ID)
+  authUrl.searchParams.set('redirect_uri', redirectUri)
+  authUrl.searchParams.set('scope', 'user:email')
+  authUrl.searchParams.set('state', state)
+  
+  return c.redirect(authUrl.toString())
+})
+
+// Handle OAuth callback
+authRoutes.get('/oauth/callback', async (c) => {
+  const code = c.req.query('code')
+  const state = c.req.query('state')
+  
+  if (!code || !state) {
+    return c.json({ error: 'Missing code or state' }, 400)
+  }
+  
+  // Verify state
+  const storedState = await c.env.USER_PROFILES.get(`oauth_state:${state}`)
+  if (!storedState) {
+    return c.json({ error: 'Invalid state' }, 400)
+  }
+  
+  // Exchange code for token
+  const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      client_id: c.env.OAUTH_CLIENT_ID,
+      client_secret: c.env.OAUTH_CLIENT_SECRET,
+      code,
+      redirect_uri: `${c.req.url.split('/auth')[0]}/auth/oauth/callback`
+    })
+  })
+  
+  const tokenData = await tokenResponse.json()
+  
+  if (tokenData.error) {
+    return c.json({ error: tokenData.error_description }, 400)
+  }
+  
+  // Get user info
+  const userResponse = await fetch('https://api.github.com/user', {
+    headers: {
+      'Authorization': `Bearer ${tokenData.access_token}`,
+      'User-Agent': 'Language-Tutor-App'
+    }
+  })
+  
+  const userData = await userResponse.json()
+  
+  // Create user session
+  const sessionToken = crypto.randomUUID()
+  await c.env.USER_PROFILES.put(`user:${sessionToken}`, JSON.stringify({
+    id: userData.id,
+    username: userData.login,
+    email: userData.email,
+    avatar: userData.avatar_url
+  }), { expirationTtl: 86400 * 7 }) // 7 days
+  
+  // Cleanup
+  await c.env.USER_PROFILES.delete(`oauth_state:${state}`)
+  
+  return c.json({
+    success: true,
+    token: sessionToken,
+    user: {
+      id: userData.id,
+      username: userData.login,
+      email: userData.email,
+      avatar: userData.avatar_url
+    }
+  })
+})
+
+export { authRoutes }
+```
+</oauth_integration>
+
+<error_handling>
+
+## Global Error Handler
+```typescript
+app.onError((err, c) => {
+  console.error('Application error:', err)
+  
+  if (err instanceof z.ZodError) {
+    return c.json({
+      error: 'Validation error',
+      details: err.errors
+    }, 400)
+  }
+  
+  return c.json({
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+  }, 500)
+})
+
+// 404 handler
+app.notFound((c) => {
+  return c.json({ error: 'Route not found' }, 404)
+})
+```
+
+## Structured Error Responses
+```typescript
+export class APIError extends Error {
+  constructor(
+    public message: string,
+    public statusCode: number = 500,
+    public code?: string
+  ) {
+    super(message)
+    this.name = 'APIError'
+  }
+}
+
+// Usage in handlers
+if (!user) {
+  throw new APIError('User not found', 404, 'USER_NOT_FOUND')
+}
+```
+</error_handling>
+
+<testing_patterns>
+
+## Route Testing
+```typescript
+import { testClient } from 'hono/testing'
+
+describe('Learning API', () => {
+  const client = testClient(app)
+  
+  test('GET /learning/progress returns user progress', async () => {
+    const res = await client.learning.progress.$get(
+      {},
+      {
+        headers: {
+          Authorization: 'Bearer test-token'
+        }
+      }
+    )
+    
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.progress).toBeDefined()
+  })
+})
+```
+
+## Mock Environment
+```typescript
+const mockEnv: Env = {
+  USER_PROFILES: {
+    get: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn()
+  } as any,
+  LEARNING_ANALYTICS: {
+    prepare: vi.fn(() => ({
+      bind: vi.fn(() => ({
+        first: vi.fn(),
+        all: vi.fn(),
+        run: vi.fn()
+      }))
+    }))
+  } as any,
+  OAUTH_CLIENT_ID: 'test-client-id',
+  OAUTH_CLIENT_SECRET: 'test-client-secret',
+  MCP_SERVER_URL: 'http://localhost:8787/sse'
+}
+```
+</testing_patterns>
+
+<performance_optimization>
+
+## Caching Strategies
+```typescript
+// Cache middleware for expensive operations
+const cacheMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next) => {
+  const cacheKey = `cache:${c.req.url}`
+  const cached = await c.env.USER_PROFILES.get(cacheKey)
+  
+  if (cached) {
+    return c.json(JSON.parse(cached))
+  }
+  
+  await next()
+  
+  // Cache successful responses
+  if (c.res.status === 200) {
+    const body = await c.res.clone().text()
+    await c.env.USER_PROFILES.put(cacheKey, body, { expirationTtl: 300 }) // 5 minutes
+  }
+})
+
+// Use for expensive endpoints
+app.get('/learning/vocabulary/:language', cacheMiddleware, getVocabulary)
+```
+
+## Streaming Responses
+```typescript
+app.get('/learning/generate-content', async (c) => {
+  const { readable, writable } = new TransformStream()
+  const writer = writable.getWriter()
+  
+  // Generate content in chunks
+  generateContentStream(writer)
+  
+  return new Response(readable, {
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Transfer-Encoding': 'chunked'
+    }
+  })
+})
+```
+</performance_optimization>
+
+<deployment_considerations>
+
+## Environment-Specific Configuration
+```typescript
+const isDevelopment = c.env.ENVIRONMENT === 'development'
+const corsOrigins = isDevelopment 
+  ? ['http://localhost:3000', 'http://localhost:5173']
+  : ['https://your-production-domain.com']
+
+app.use('*', cors({ origin: corsOrigins }))
+```
+
+## Health Check Endpoint
+```typescript
+app.get('/health', async (c) => {
+  try {
+    // Check database connection
+    await c.env.LEARNING_ANALYTICS.prepare('SELECT 1').first()
+    
+    // Check KV access
+    await c.env.USER_PROFILES.get('health-check')
+    
+    return c.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      version: '1.0.0'
+    })
+  } catch (error) {
+    return c.json({
+      status: 'unhealthy',
+      error: error.message
+    }, 503)
+  }
+})
+```
+</deployment_considerations>
+

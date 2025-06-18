@@ -1,0 +1,31 @@
+# AI Service API Keys
+ANTHROPIC_API_KEY=sk-ant-api03-your-anthropic-key-here
+OPENAI_API_KEY=sk-proj-your-openai-key-here
+
+# OAuth Authentication (GitHub)
+OAUTH_CLIENT_ID=your-github-oauth-app-client-id
+OAUTH_CLIENT_SECRET=your-github-oauth-app-client-secret
+
+# Alternative: Direct GitHub OAuth (choose one approach)
+GITHUB_CLIENT_ID=your-github-client-id  
+GITHUB_CLIENT_SECRET=your-github-client-secret
+
+# MCP Server Configuration
+MCP_SERVER_URL=http://localhost:8787/sse
+
+# Security & Encryption
+ENCRYPTION_KEY=your-32-character-encryption-key
+JWT_SECRET=your-jwt-secret-for-sessions
+
+# Language Learning APIs (Optional)
+GOOGLE_TRANSLATE_API_KEY=your-google-translate-key
+DEEPL_API_KEY=your-deepl-api-key
+
+# Development Configuration
+ENVIRONMENT=development
+DEBUG=true
+LOG_LEVEL=debug
+SUPPORTED_LANGUAGES=en,es,fr,de,it,pt,zh,ja
+
+# Optional - Cloudflare AI Gateway for better control and monitoring
+# GATEWAY_BASE_URL=https://gateway.ai.cloudflare.com/v1/your-account-id/your-gateway-id
