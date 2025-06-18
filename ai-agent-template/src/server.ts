@@ -116,7 +116,7 @@ Be encouraging, patient, and adapt to the user's language level. If the user ask
   }
 }
 
-export const Chat = ChatInternal;
+export class Chat extends ChatInternal {}
 
 /**
  * Worker entry point that routes incoming requests to the appropriate handler
@@ -131,6 +131,14 @@ export default {
         return Response.json({
           success: hasOpenAIKey,
         });
+      }
+
+      // Handle API routes
+      if (url.pathname.startsWith("/api/")) {
+        return (
+          (await routeAgentRequest(request, env)) ||
+          new Response("API endpoint not found", { status: 404 })
+        );
       }
       if (!process.env.OPENAI_API_KEY) {
         console.error(
