@@ -1,123 +1,134 @@
 import { useEffect, useState } from "react";
+import { useChat } from "@ai-sdk/react";
+import { type ToolInvocation, type Message } from "ai";
 
 // Component imports
 import { Button } from "@/components/button/Button";
-import { Card } from "@/components/card/Card";
-import { Flashcard } from "@/components/flashcard/Flashcard";
-import { Quiz } from "@/components/quiz/Quiz";
+import { Input } from "@/components/input/Input";
+import { Textarea } from "@/components/textarea/Textarea";
+import { ToolInvocationCard } from "@/components/tool-invocation-card/ToolInvocationCard";
+import { Avatar } from "@/components/avatar/Avatar";
+import { MemoizedMarkdown } from "@/components/memoized-markdown";
 
 // Icon imports
 import {
   Moon,
   Sun,
-  ArrowLeft,
+  PaperPlaneTilt,
+  Brain,
+  Lightning,
+  Eye,
   BookOpen,
-  Cards,
-  GameController,
-  SpeakerHigh,
-  TextAa,
+  Robot,
 } from "@phosphor-icons/react";
 
 // TTS imports
-import { initTTS, getTTS } from "@/utils/textToSpeech";
+import { initTTS } from "@/utils/textToSpeech";
 
 // Types
-interface FlashcardData {
+interface ReasoningStep {
   id: string;
-  front: string;
-  back: string;
-  pronunciation?: string;
-  example?: string;
-  difficulty?: 'beginner' | 'intermediate' | 'advanced';
-  partOfSpeech?: string;
+  type: 'thought' | 'action' | 'observation';
+  content: string;
+  timestamp: Date;
+  tool?: string;
+  result?: any;
 }
 
-interface QuizQuestion {
-  id: string;
-  question: string;
-  options: string[];
-  correctAnswer: number;
-  explanation: string;
-  audioText?: string;
+interface LearningProgress {
+  session: string;
+  steps: ReasoningStep[];
+  goal: string;
+  completed: boolean;
+  learnings: string[];
 }
-
-type AppMode = 'home' | 'flashcards' | 'quiz' | 'pronunciation' | 'grammar';
 
 export default function App() {
   const [theme, setTheme] = useState<"dark" | "light">(() => {
-    // Check localStorage first, default to dark if not found
     const savedTheme = localStorage.getItem("theme");
     return (savedTheme as "dark" | "light") || "dark";
   });
 
-  const [currentMode, setCurrentMode] = useState<AppMode>('home');
-  const [currentFlashcardIndex, setCurrentFlashcardIndex] = useState(0);
-  const [isCardFlipped, setIsCardFlipped] = useState(false);
+  const [openAIKey, setOpenAIKey] = useState("");
+  const [hasValidKey, setHasValidKey] = useState(false);
+  const [reasoning, setReasoning] = useState<ReasoningStep[]>([]);
+  const [currentGoal, setCurrentGoal] = useState("");
+  const [learningProgress, setLearningProgress] = useState<LearningProgress[]>([]);
+  const [agentMode, setAgentMode] = useState<'reactive' | 'proactive'>('reactive');
+  const [isReasoning, setIsReasoning] = useState(false);
   const [elevenlabsKey, setElevenlabsKey] = useState('');
 
-  // Sample flashcards data
-  const [flashcards] = useState<FlashcardData[]>([
-    {
-      id: '1',
-      front: 'Serendipity',
-      back: 'A pleasant surprise; finding something good without looking for it',
-      pronunciation: 'ser-ən-ˈdi-pə-tē',
-      example: 'Meeting my best friend was pure serendipity.',
-      difficulty: 'advanced',
-      partOfSpeech: 'noun'
+  // Agent configuration with ReACT prompting
+  const {
+    isLoading: agentLoading,
+    messages,
+    input,
+    setInput,
+    handleSubmit: originalHandleSubmit,
+    addToolResult,
+  } = useChat({
+    api: "/api/chat",
+    headers: {
+      "x-openai-key": openAIKey,
     },
-    {
-      id: '2',
-      front: 'Eloquent',
-      back: 'Fluent and persuasive in speaking or writing',
-      pronunciation: 'ˈe-lə-kwənt',
-      example: 'She gave an eloquent speech about climate change.',
-      difficulty: 'intermediate',
-      partOfSpeech: 'adjective'
-    },
-    {
-      id: '3',
-      front: 'Ubiquitous',
-      back: 'Present, appearing, or found everywhere',
-      pronunciation: 'yo͞oˈbikwədəs',
-      example: 'Smartphones have become ubiquitous in modern society.',
-      difficulty: 'advanced',
-      partOfSpeech: 'adjective'
-    },
-  ]);
+    initialMessages: [
+      {
+        id: "system",
+        role: "system",
+        content: `You are an advanced English Learning AI Agent using the ReACT (Reasoning + Acting) paradigm. You help users learn English through interactive lessons, flashcards, quizzes, pronunciation, and grammar practice.
 
-  // Sample quiz data
-  const [quizQuestions] = useState<QuizQuestion[]>([
-    {
-      id: '1',
-      question: 'What does "serendipity" mean?',
-      options: [
-        'A planned discovery',
-        'A pleasant surprise or unexpected find',
-        'A type of scientific method',
-        'A musical term'
-      ],
-      correctAnswer: 1,
-      explanation: 'Serendipity refers to finding something good or useful without looking for it.',
-      audioText: 'serendipity'
-    },
-    {
-      id: '2',
-      question: 'Choose the correct pronunciation of "eloquent":',
-      options: [
-        'ee-LO-kwent',
-        'EL-o-kwent',
-        'e-LOQ-uent',
-        'el-O-kwent'
-      ],
-      correctAnswer: 1,
-      explanation: 'Eloquent is pronounced as EL-o-kwent with emphasis on the first syllable.',
-      audioText: 'eloquent'
+## ReACT Framework Instructions:
+You MUST follow this exact pattern for every response:
+
+**Thought**: [Analyze the user's request and plan your approach]
+**Action**: [Choose and execute appropriate tools or provide direct teaching]
+**Observation**: [Reflect on the results and plan next steps]
+
+## Available Learning Tools:
+- createFlashcard: Generate individual vocabulary flashcards
+- createFlashcardSet: Create themed flashcard collections
+- createVocabularyQuiz: Generate interactive quizzes
+- practicePronunciation: Provide pronunciation guidance
+- setElevenLabsKey: Configure text-to-speech
+- setMemory: Remember user progress and preferences
+- forgetMemory: Clear specific learning data
+
+## Teaching Approach:
+1. **Always start with a Thought** - reason about what the user needs
+2. **Take Action** - use tools or provide direct instruction
+3. **Make Observations** - reflect on effectiveness and suggest improvements
+4. **Adapt** - modify approach based on user response
+
+## Example ReACT Pattern:
+User: "I want to learn advanced vocabulary"
+
+**Thought**: The user wants advanced vocabulary. I should assess their current level and create appropriate flashcards with challenging words that include pronunciation, examples, and context.
+
+**Action**: I'll create a set of advanced vocabulary flashcards focusing on academic and professional terms.
+
+**Observation**: These flashcards will help build sophisticated vocabulary. I should also offer pronunciation practice and usage examples.
+
+Be interactive, encouraging, and always follow the Thought-Action-Observation pattern!`,
+      },
+    ],
+  });
+
+  // Check for API key on mount
+  useEffect(() => {
+    const savedKey = localStorage.getItem("openai-api-key");
+    if (savedKey) {
+      setOpenAIKey(savedKey);
+      setHasValidKey(true);
     }
-  ]);
+
+    const savedElevenLabsKey = localStorage.getItem('elevenlabs_api_key');
+    if (savedElevenLabsKey) {
+      setElevenlabsKey(savedElevenLabsKey);
+      initTTS(savedElevenLabsKey);
+    }
+  }, []);
 
   useEffect(() => {
-    // Apply theme class on mount and when theme changes
     if (theme === "dark") {
       document.documentElement.classList.add("dark");
       document.documentElement.classList.remove("light");
@@ -125,351 +136,396 @@ export default function App() {
       document.documentElement.classList.remove("dark");
       document.documentElement.classList.add("light");
     }
-
-    // Save theme preference to localStorage
     localStorage.setItem("theme", theme);
   }, [theme]);
 
+  // Extract reasoning steps from messages
   useEffect(() => {
-    // Check for existing ElevenLabs API key
-    const savedKey = localStorage.getItem('elevenlabs_api_key');
-    if (savedKey) {
-      setElevenlabsKey(savedKey);
-      initTTS(savedKey);
-    }
-  }, []);
-
-  const toggleTheme = () => {
-    const newTheme = theme === "dark" ? "light" : "dark";
-    setTheme(newTheme);
-  };
-
-  const handleSpeak = async (text: string) => {
-    const tts = getTTS();
-    if (tts) {
-      try {
-        await tts.speak(text);
-      } catch (error) {
-        console.error('TTS error:', error);
-        // Fallback to browser speech
-        if ('speechSynthesis' in window) {
-          const utterance = new SpeechSynthesisUtterance(text);
-          utterance.lang = 'en-US';
-          speechSynthesis.speak(utterance);
+    const newReasoning: ReasoningStep[] = [];
+    
+    messages.forEach((message: Message, index: number) => {
+      if (message.role === 'assistant' && message.content) {
+        const content = message.content;
+        
+        // Extract Thought, Action, Observation patterns
+        const thoughtMatch = content.match(/\*\*Thought\*\*:?\s*([^*]+)/i);
+        const actionMatch = content.match(/\*\*Action\*\*:?\s*([^*]+)/i);
+        const observationMatch = content.match(/\*\*Observation\*\*:?\s*([^*]+)/i);
+        
+        if (thoughtMatch) {
+          newReasoning.push({
+            id: `thought-${index}`,
+            type: 'thought',
+            content: thoughtMatch[1].trim(),
+            timestamp: message.createdAt || new Date(),
+          });
+        }
+        
+        if (actionMatch) {
+          newReasoning.push({
+            id: `action-${index}`,
+            type: 'action',
+            content: actionMatch[1].trim(),
+            timestamp: message.createdAt || new Date(),
+          });
+        }
+        
+        if (observationMatch) {
+          newReasoning.push({
+            id: `observation-${index}`,
+            type: 'observation',
+            content: observationMatch[1].trim(),
+            timestamp: message.createdAt || new Date(),
+          });
         }
       }
-    } else {
-      // Browser speech synthesis fallback
-      if ('speechSynthesis' in window) {
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'en-US';
-        speechSynthesis.speak(utterance);
+      
+      // Track tool invocations as actions
+      if (message.toolInvocations) {
+        message.toolInvocations.forEach((tool: any, toolIndex: number) => {
+          newReasoning.push({
+            id: `tool-${index}-${toolIndex}`,
+            type: 'action',
+            content: `Using tool: ${tool.toolName}`,
+            timestamp: message.createdAt || new Date(),
+            tool: tool.toolName,
+            result: tool.result || 'pending',
+          });
+        });
       }
+    });
+    
+    setReasoning(newReasoning);
+  }, [messages]);
+
+  const toggleTheme = () => {
+    setTheme(theme === "dark" ? "light" : "dark");
+  };
+
+  const handleApiKeySubmit = () => {
+    if (openAIKey.trim()) {
+      localStorage.setItem("openai-api-key", openAIKey);
+      setHasValidKey(true);
     }
   };
 
-  const handleNextCard = () => {
-    setCurrentFlashcardIndex((prev) => (prev + 1) % flashcards.length);
-    setIsCardFlipped(false);
+  const handleElevenLabsKeySubmit = () => {
+    if (elevenlabsKey.trim()) {
+      localStorage.setItem('elevenlabs_api_key', elevenlabsKey);
+      initTTS(elevenlabsKey);
+    }
   };
 
-  const handlePreviousCard = () => {
-    setCurrentFlashcardIndex((prev) => (prev - 1 + flashcards.length) % flashcards.length);
-    setIsCardFlipped(false);
+  const handleSubmit = (e: React.FormEvent) => {
+    setIsReasoning(true);
+    originalHandleSubmit(e);
+    setTimeout(() => setIsReasoning(false), 2000);
   };
 
-  const handleFlipCard = () => {
-    setIsCardFlipped(!isCardFlipped);
+  const getReasoningIcon = (type: 'thought' | 'action' | 'observation') => {
+    switch (type) {
+      case 'thought':
+        return <Brain size={16} className="text-blue-500" />;
+      case 'action':
+        return <Lightning size={16} className="text-yellow-500" />;
+      case 'observation':
+        return <Eye size={16} className="text-green-500" />;
+    }
+  };
+
+  const getReasoningColor = (type: 'thought' | 'action' | 'observation') => {
+    switch (type) {
+      case 'thought':
+        return 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20';
+      case 'action':
+        return 'border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/20';
+      case 'observation':
+        return 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20';
+    }
   };
 
   const renderHeader = () => (
     <div className="px-6 py-4 border-b border-neutral-300 dark:border-neutral-800 flex items-center gap-3 bg-white dark:bg-gray-900">
       <div className="flex items-center justify-center h-8 w-8">
-        <BookOpen size={28} className="text-[#F48120]" />
+        <Robot size={28} className="text-[#F48120]" />
       </div>
 
       <div className="flex-1">
-        <h2 className="font-semibold text-base">
-          {currentMode === 'home' ? 'English Learning Hub' : 
-           currentMode === 'flashcards' ? 'Vocabulary Flashcards' :
-           currentMode === 'quiz' ? 'Quiz Challenge' :
-           currentMode === 'pronunciation' ? 'Pronunciation Practice' :
-           'Grammar Check'}
-        </h2>
-      </div>
-
-      {currentMode !== 'home' && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setCurrentMode('home')}
-        >
-          <ArrowLeft size={16} />
-          Back
-        </Button>
-      )}
-
-      <Button
-        variant="ghost"
-        size="md"
-        shape="square"
-        className="rounded-full h-9 w-9"
-        onClick={toggleTheme}
-      >
-        {theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}
-      </Button>
-    </div>
-  );
-
-  const renderHomeContent = () => (
-    <div className="p-6">
-      <div className="text-center mb-8">
-        <div className="text-6xl mb-4">📚</div>
-        <h1 className="text-3xl font-bold mb-2">English Learning Hub</h1>
-        <p className="text-gray-600 dark:text-gray-400">
-          Master English with interactive learning tools and AI-powered features.
+        <h2 className="font-semibold text-base">English Learning AI Agent</h2>
+        <p className="text-xs text-neutral-600 dark:text-neutral-400">
+          ReACT Framework: Reasoning + Acting
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
-        <div 
-          className="cursor-pointer transform hover:scale-105"
-          onClick={() => setCurrentMode('flashcards')}
-        >
-          <Card className="p-6 hover:shadow-lg transition-all duration-200">
-            <div className="text-center space-y-4">
-              <div className="text-5xl text-blue-600">
-                <Cards size={48} />
-              </div>
-              <h3 className="text-xl font-semibold">Flashcards</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Study vocabulary with interactive swipeable flashcards
-              </p>
-              <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded text-xs text-blue-600 dark:text-blue-400">
-                {flashcards.length} cards available • Swipe to navigate
-              </div>
-            </div>
-          </Card>
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300">
+          <Brain size={12} />
+          <span>Reasoning: {reasoning.filter(r => r.type === 'thought').length}</span>
         </div>
-
-        <div 
-          className="cursor-pointer transform hover:scale-105"
-          onClick={() => setCurrentMode('quiz')}
-        >
-          <Card className="p-6 hover:shadow-lg transition-all duration-200">
-            <div className="text-center space-y-4">
-              <div className="text-5xl text-green-600">
-                <GameController size={48} />
-              </div>
-              <h3 className="text-xl font-semibold">Interactive Quiz</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Test your knowledge with timed multiple-choice questions
-              </p>
-              <div className="bg-green-50 dark:bg-green-900/20 p-2 rounded text-xs text-green-600 dark:text-green-400">
-                {quizQuestions.length} questions • Audio support
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        <div 
-          className="cursor-pointer transform hover:scale-105"
-          onClick={() => setCurrentMode('pronunciation')}
-        >
-          <Card className="p-6 hover:shadow-lg transition-all duration-200">
-            <div className="text-center space-y-4">
-              <div className="text-5xl text-purple-600">
-                <SpeakerHigh size={48} />
-              </div>
-              <h3 className="text-xl font-semibold">Pronunciation</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Practice pronunciation with high-quality text-to-speech
-              </p>
-              <div className="bg-purple-50 dark:bg-purple-900/20 p-2 rounded text-xs text-purple-600 dark:text-purple-400">
-                {elevenlabsKey ? 'ElevenLabs enabled' : 'Browser TTS'} • Click to speak
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        <div 
-          className="cursor-pointer transform hover:scale-105"
-          onClick={() => setCurrentMode('grammar')}
-        >
-          <Card className="p-6 hover:shadow-lg transition-all duration-200">
-            <div className="text-center space-y-4">
-              <div className="text-5xl text-orange-600">
-                <TextAa size={48} />
-              </div>
-              <h3 className="text-xl font-semibold">Grammar & Tools</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Check grammar, get translations, and language tools
-              </p>
-              <div className="bg-orange-50 dark:bg-orange-900/20 p-2 rounded text-xs text-orange-600 dark:text-orange-400">
-                AI-powered • Instant feedback
-              </div>
-            </div>
-          </Card>
-        </div>
-      </div>
-
-      {/* ElevenLabs API Key Section */}
-      <div className="mt-8 max-w-md mx-auto">
-        <Card className="p-6 bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800">
-          <div className="text-center">
-            <div className="text-yellow-600 dark:text-yellow-400 mb-2">🔑 Pro Tip</div>
-            <p className="text-sm text-yellow-800 dark:text-yellow-200 mb-3">
-              Add your ElevenLabs API key for premium text-to-speech quality!
-            </p>
-            <input
-              type="password"
-              placeholder="Enter ElevenLabs API key..."
-              value={elevenlabsKey}
-              onChange={(e) => setElevenlabsKey(e.target.value)}
-              className="w-full p-2 text-sm border rounded dark:bg-gray-800 dark:border-gray-600"
-            />
-            <Button
-              size="sm"
-              className="mt-2 w-full"
-              onClick={() => {
-                if (elevenlabsKey.trim()) {
-                  localStorage.setItem('elevenlabs_api_key', elevenlabsKey);
-                  initTTS(elevenlabsKey);
-                  alert('ElevenLabs API key saved!');
-                }
-              }}
-            >
-              Save API Key
-            </Button>
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
-
-  const renderFlashcardsContent = () => (
-    <div className="p-6">
-      <Flashcard
-        cards={flashcards}
-        currentIndex={currentFlashcardIndex}
-        onNext={handleNextCard}
-        onPrevious={handlePreviousCard}
-        onFlip={handleFlipCard}
-        isFlipped={isCardFlipped}
-        onSpeak={handleSpeak}
-      />
-    </div>
-  );
-
-  const renderQuizContent = () => (
-    <div className="p-6">
-      <Quiz
-        questions={quizQuestions}
-        onSpeak={handleSpeak}
-        onComplete={(score, results) => {
-          console.log('Quiz completed with score:', score, 'Results:', results);
-          // You can add more completion logic here like saving results
-        }}
-      />
-    </div>
-  );
-
-  const renderPronunciationContent = () => (
-    <div className="p-6 max-w-2xl mx-auto">
-      <Card className="p-8 text-center">
-        <div className="text-6xl mb-4">🎤</div>
-        <h3 className="text-2xl font-semibold mb-4">Pronunciation Practice</h3>
-        <p className="text-gray-600 dark:text-gray-400 mb-6">
-          Practice pronouncing English words and phrases with audio feedback.
-        </p>
         
-        <div className="space-y-4">
-          {flashcards.slice(0, 3).map((card) => (
-            <div key={card.id} className="border rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <div className="text-left">
-                  <div className="font-semibold">{card.front}</div>
-                  {card.pronunciation && (
-                    <div className="text-sm text-blue-600 dark:text-blue-400">
-                      /{card.pronunciation}/
+        <div className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-yellow-100 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300">
+          <Lightning size={12} />
+          <span>Actions: {reasoning.filter(r => r.type === 'action').length}</span>
+        </div>
+
+        <Button
+          onClick={toggleTheme}
+          variant="secondary"
+          size="sm"
+          className="p-2"
+        >
+          {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+        </Button>
+      </div>
+    </div>
+  );
+
+  const renderReasoningPanel = () => (
+    <div className="border-l border-neutral-300 dark:border-neutral-800 w-80 bg-neutral-50 dark:bg-gray-800 p-4 overflow-y-auto">
+      <div className="flex items-center gap-2 mb-4">
+        <Brain size={20} className="text-blue-500" />
+        <h3 className="font-semibold">Agent Reasoning</h3>
+      </div>
+      
+      {isReasoning && (
+        <div className="mb-4 p-3 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+          <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+            <Brain size={16} className="animate-pulse" />
+            <span className="text-sm font-medium">Agent is reasoning...</span>
+          </div>
+        </div>
+      )}
+      
+      <div className="space-y-3">
+        {reasoning.slice(-10).map((step) => (
+          <div key={step.id} className={`p-3 border rounded-lg ${getReasoningColor(step.type)}`}>
+            <div className="flex items-center gap-2 mb-1">
+              {getReasoningIcon(step.type)}
+              <span className="text-xs font-medium capitalize">{step.type}</span>
+              <span className="text-xs text-neutral-500 ml-auto">
+                {step.timestamp.toLocaleTimeString()}
+              </span>
+            </div>
+            <p className="text-sm">{step.content}</p>
+            {step.tool && (
+              <div className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">
+                Tool: {step.tool}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      
+      {reasoning.length === 0 && (
+        <div className="text-center text-neutral-500 dark:text-neutral-400 text-sm">
+          Start a conversation to see agent reasoning
+        </div>
+      )}
+    </div>
+  );
+
+  if (!hasValidKey) {
+    return (
+      <div className="h-screen flex flex-col bg-white dark:bg-gray-900">
+        {renderHeader()}
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="max-w-md w-full">
+            <div className="text-center mb-6">
+              <Robot size={48} className="text-[#F48120] mx-auto mb-4" />
+              <h1 className="text-2xl font-bold mb-2">English Learning AI Agent</h1>
+              <p className="text-neutral-600 dark:text-neutral-400">
+                Welcome to your personal English learning assistant powered by ReACT AI! 
+                I can reason through problems, take actions, and help you learn through 
+                interactive flashcards, quizzes, pronunciation practice, and more.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  OpenAI API Key
+                </label>
+                <Input
+                  type="password"
+                  placeholder="sk-..."
+                  value={openAIKey}
+                  onChange={(e) => setOpenAIKey(e.target.value)}
+                  onValueChange={(value) => setOpenAIKey(value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleApiKeySubmit()}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  ElevenLabs API Key (Optional - for premium TTS)
+                </label>
+                <Input
+                  type="password"
+                  placeholder="Your ElevenLabs API key..."
+                  value={elevenlabsKey}
+                  onChange={(e) => setElevenlabsKey(e.target.value)}
+                  onValueChange={(value) => setElevenlabsKey(value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleElevenLabsKeySubmit()}
+                />
+              </div>
+
+              <Button onClick={handleApiKeySubmit} className="w-full">
+                Start Learning with AI Agent
+              </Button>
+            </div>
+
+            <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+              <h3 className="font-semibold mb-2 text-blue-900 dark:text-blue-100">
+                What makes this agent special?
+              </h3>
+              <ul className="text-sm text-blue-800 dark:text-blue-200 space-y-1">
+                <li>• <strong>Reasoning:</strong> Thinks through problems step by step</li>
+                <li>• <strong>Acting:</strong> Uses tools and takes concrete actions</li>
+                <li>• <strong>Observing:</strong> Reflects on results and adapts</li>
+                <li>• <strong>Learning:</strong> Remembers your progress and preferences</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-screen flex flex-col bg-white dark:bg-gray-900">
+      {renderHeader()}
+      
+      <div className="flex-1 flex overflow-hidden">
+        {/* Main Chat Area */}
+        <div className="flex-1 flex flex-col">
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            {messages.length === 1 && (
+              <div className="text-center py-12">
+                <Robot size={64} className="text-[#F48120] mx-auto mb-4" />
+                <h2 className="text-xl font-semibold mb-2">Ready to Learn English!</h2>
+                <p className="text-neutral-600 dark:text-neutral-400 mb-6">
+                  I'm your AI learning agent. I can help you with vocabulary, grammar, 
+                  pronunciation, and more using interactive tools and reasoning.
+                </p>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
+                  <div className="p-4 border border-neutral-200 dark:border-neutral-700 rounded-lg hover:bg-neutral-50 dark:hover:bg-neutral-800 cursor-pointer transition-colors"
+                       onClick={() => setInput("Create flashcards for advanced vocabulary words")}>
+                    <BookOpen size={24} className="text-blue-500 mb-2" />
+                    <h3 className="font-medium mb-1">Vocabulary Flashcards</h3>
+                    <p className="text-sm text-neutral-600 dark:text-neutral-400">
+                      Create interactive flashcards for any topic
+                    </p>
+                  </div>
+                  
+                  <div className="p-4 border border-neutral-200 dark:border-neutral-700 rounded-lg hover:bg-neutral-50 dark:hover:bg-neutral-800 cursor-pointer transition-colors"
+                       onClick={() => setInput("Generate a quiz on English grammar")}>
+                    <Lightning size={24} className="text-yellow-500 mb-2" />
+                    <h3 className="font-medium mb-1">Interactive Quizzes</h3>
+                    <p className="text-sm text-neutral-600 dark:text-neutral-400">
+                      Test your knowledge with smart quizzes
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {messages.slice(1).map((message) => (
+              <div
+                key={message.id}
+                className={`flex gap-3 ${
+                  message.role === "user" ? "justify-end" : "justify-start"
+                }`}
+              >
+                {message.role === "assistant" && (
+                  <Avatar 
+                    username="AI"
+                    className="w-8 h-8 bg-[#F48120] text-white flex items-center justify-center text-sm font-medium"
+                  />
+                )}
+                
+                <div
+                  className={`max-w-[70%] ${
+                    message.role === "user"
+                      ? "bg-blue-500 text-white rounded-2xl rounded-br-md px-4 py-2"
+                      : "bg-neutral-100 dark:bg-neutral-800 rounded-2xl rounded-bl-md px-4 py-3"
+                  }`}
+                >
+                  {message.content && (
+                    <MemoizedMarkdown content={message.content} id={message.id} />
+                  )}
+                  
+                  {message.toolInvocations && (
+                    <div className="mt-2 space-y-2">
+                      {message.toolInvocations.map((tool: ToolInvocation) => (
+                        <ToolInvocationCard
+                          key={tool.toolCallId}
+                          toolInvocation={tool}
+                          toolCallId={tool.toolCallId}
+                          needsConfirmation={false}
+                          addToolResult={addToolResult}
+                        />
+                      ))}
                     </div>
                   )}
                 </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => handleSpeak(card.front)}
-                >
-                  <SpeakerHigh size={16} />
-                  Speak
-                </Button>
+                
+                {message.role === "user" && (
+                  <Avatar 
+                    username="User"
+                    className="w-8 h-8 bg-blue-500 text-white flex items-center justify-center text-sm font-medium"
+                  />
+                )}
               </div>
+            ))}
+            
+            {agentLoading && (
+              <div className="flex gap-3 justify-start">
+                <Avatar 
+                  username="AI"
+                  className="w-8 h-8 bg-[#F48120] text-white flex items-center justify-center text-sm font-medium"
+                />
+                <div className="bg-neutral-100 dark:bg-neutral-800 rounded-2xl rounded-bl-md px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <Brain size={16} className="animate-pulse text-blue-500" />
+                    <span className="text-sm">Agent is reasoning...</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Input Area */}
+          <form onSubmit={handleSubmit} className="p-6 border-t border-neutral-300 dark:border-neutral-800">
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <Textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Ask me anything about English learning! I'll reason through it step by step..."
+                  className="min-h-[60px] resize-none"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSubmit(e);
+                    }
+                  }}
+                />
+              </div>
+              <Button
+                type="submit"
+                disabled={agentLoading || !input.trim()}
+                className="px-4 py-2 h-[60px]"
+              >
+                <PaperPlaneTilt size={20} />
+              </Button>
             </div>
-          ))}
+          </form>
         </div>
 
-        <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-          <p className="text-sm text-blue-800 dark:text-blue-200">
-            💡 Try different words and listen to the pronunciation. 
-            {elevenlabsKey ? ' Using premium ElevenLabs voice!' : ' Using browser speech synthesis.'}
-          </p>
-        </div>
-      </Card>
-    </div>
-  );
-
-  const renderGrammarContent = () => (
-    <div className="p-6 max-w-2xl mx-auto">
-      <Card className="p-8 text-center">
-        <div className="text-6xl mb-4">📝</div>
-        <h3 className="text-2xl font-semibold mb-4">Grammar & Language Tools</h3>
-        <p className="text-gray-600 dark:text-gray-400 mb-6">
-          Check grammar, get translations, and improve your English writing.
-        </p>
-
-        <div className="space-y-4 text-left">
-          <div className="border rounded-lg p-4">
-            <h4 className="font-semibold mb-2">Grammar Check</h4>
-            <textarea
-              className="w-full p-3 border rounded dark:bg-gray-800 dark:border-gray-600"
-              rows={3}
-              placeholder="Type a sentence to check grammar..."
-            />
-            <Button className="mt-2 w-full">Check Grammar</Button>
-          </div>
-
-          <div className="border rounded-lg p-4">
-            <h4 className="font-semibold mb-2">Translation</h4>
-            <input
-              type="text"
-              className="w-full p-3 border rounded dark:bg-gray-800 dark:border-gray-600"
-              placeholder="Enter text to translate..."
-            />
-            <Button className="mt-2 w-full">Translate</Button>
-          </div>
-        </div>
-
-        <div className="mt-6 p-4 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
-          <p className="text-sm text-orange-800 dark:text-orange-200">
-            🚧 These tools are currently in development. More features coming soon!
-          </p>
-        </div>
-      </Card>
-    </div>
-  );
-
-  return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <div className="max-w-6xl mx-auto">
-        {renderHeader()}
-        
-        <div className="min-h-[calc(100vh-80px)]">
-          {currentMode === 'home' && renderHomeContent()}
-          {currentMode === 'flashcards' && renderFlashcardsContent()}
-          {currentMode === 'quiz' && renderQuizContent()}
-          {currentMode === 'pronunciation' && renderPronunciationContent()}
-          {currentMode === 'grammar' && renderGrammarContent()}
-        </div>
+        {/* Reasoning Panel */}
+        {renderReasoningPanel()}
       </div>
     </div>
   );
