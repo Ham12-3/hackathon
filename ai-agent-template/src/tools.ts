@@ -402,6 +402,39 @@ Return a JSON object with:
 });
 
 /**
+ * Set ElevenLabs API key for text-to-speech
+ */
+const setElevenLabsKey = tool({
+  description: "Set or update the ElevenLabs API key for high-quality text-to-speech",
+  parameters: z.object({
+    apiKey: z.string().describe("The ElevenLabs API key"),
+  }),
+  execute: async ({ apiKey }) => {
+    try {
+      // Store in localStorage (this runs on client side)
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('elevenlabs_api_key', apiKey);
+        return {
+          type: 'success',
+          message: 'ElevenLabs API key saved successfully! You can now use high-quality text-to-speech for pronunciation practice.',
+          data: {
+            keySet: true,
+            instructions: 'Use the pronunciation tools or create flashcards to test the text-to-speech functionality.'
+          }
+        };
+      } else {
+        return {
+          type: 'error',
+          message: 'Unable to save API key - localStorage not available'
+        };
+      }
+    } catch (error) {
+      return `Failed to set ElevenLabs key: ${error}`;
+    }
+  },
+});
+
+/**
  * Grammar checking and correction tool
  */
 const checkGrammar = tool({
@@ -531,6 +564,7 @@ export const tools = {
   createFlashcardSet,
   createVocabularyQuiz,
   practicePronunciation,
+  setElevenLabsKey,
   checkGrammar,
   generateVocabularyQuiz,
   startConversationPractice,

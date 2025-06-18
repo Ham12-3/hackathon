@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { Card } from '@/components/card/Card';
 import { Button } from '@/components/button/Button';
 import { ArrowLeft, ArrowRight, SpeakerHigh, Star } from '@phosphor-icons/react';
@@ -145,12 +145,15 @@ export function Flashcard({
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
-        <Card 
-          className={`w-full h-64 transition-transform duration-500 preserve-3d cursor-pointer ${
-            isFlipped ? 'rotate-y-180' : ''
-          }`}
+        <div 
+          className="cursor-pointer"
           onClick={onFlip}
         >
+          <Card 
+            className={`w-full h-64 transition-transform duration-500 preserve-3d ${
+              isFlipped ? 'rotate-y-180' : ''
+            }`}
+          >
           {/* Front of card */}
           <div className={`absolute inset-0 w-full h-full backface-hidden ${isFlipped ? 'invisible' : 'visible'}`}>
             <div className="p-6 h-full flex flex-col justify-center items-center text-center">
@@ -213,12 +216,13 @@ export function Flashcard({
             </div>
           </div>
         </Card>
+        </div>
       </div>
 
       {/* Navigation controls */}
       <div className="flex justify-between items-center mt-4">
         <Button
-          variant="outline"
+          variant="secondary"
           onClick={onPrevious}
           disabled={currentIndex === 0}
           className="flex items-center gap-2"
@@ -230,7 +234,7 @@ export function Flashcard({
         <div className="flex gap-2">
           {onMarkUnknown && (
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={() => onMarkUnknown(currentCard.id)}
               className="text-red-600 border-red-300 hover:bg-red-50"
@@ -240,7 +244,7 @@ export function Flashcard({
           )}
           {onMarkKnown && (
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={() => onMarkKnown(currentCard.id)}
               className="text-green-600 border-green-300 hover:bg-green-50"
@@ -252,7 +256,7 @@ export function Flashcard({
         </div>
 
         <Button
-          variant="outline"
+          variant="secondary"
           onClick={onNext}
           disabled={currentIndex === cards.length - 1}
           className="flex items-center gap-2"
