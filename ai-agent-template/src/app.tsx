@@ -513,9 +513,19 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
     // Simulate AI response with ReACT pattern
     setTimeout(() => {
       const userInput = input.toLowerCase();
-      const isQuizRequest = userInput.includes('quiz') || userInput.includes('test') || userInput.includes('question');
-      const isFlashcardRequest = userInput.includes('flashcard') || userInput.includes('vocabulary') || userInput.includes('word');
-      const isPronunciationRequest = userInput.includes('pronunciation') || userInput.includes('pronounce') || userInput.includes('speak') || userInput.includes('sound');
+      
+      // Check for pronunciation first (highest priority for pronunciation-specific terms)
+      const isPronunciationRequest = userInput.includes('pronunciation') || userInput.includes('pronounce') || 
+                                   userInput.includes('speak') || userInput.includes('sound') ||
+                                   userInput.includes('ipa') || userInput.includes('phonetic') ||
+                                   userInput.includes('accent') || userInput.includes('articulate');
+      
+      const isQuizRequest = !isPronunciationRequest && (userInput.includes('quiz') || userInput.includes('test') || userInput.includes('question'));
+      
+      // Only match flashcards if it's not pronunciation and contains specific flashcard/vocabulary terms
+      const isFlashcardRequest = !isPronunciationRequest && !isQuizRequest && 
+                               (userInput.includes('flashcard') || userInput.includes('vocabulary') || 
+                                (userInput.includes('word') && !userInput.includes('pronounce')));
       
       let quiz: QuizData | undefined;
       let flashcards: FlashcardData[] | undefined;
