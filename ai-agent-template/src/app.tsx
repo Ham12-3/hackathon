@@ -223,6 +223,152 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
     }
   };
 
+  const generateQuiz = (topic: string): QuizData => {
+    const grammarQuestions: QuizQuestion[] = [
+      {
+        id: 'q1',
+        question: 'Which sentence uses the correct past perfect tense?',
+        options: [
+          'I had finished my homework before dinner.',
+          'I have finished my homework before dinner.',
+          'I finished my homework before dinner.',
+          'I will have finished my homework before dinner.'
+        ],
+        correctAnswer: 0,
+        explanation: 'Past perfect (had + past participle) shows an action completed before another past action.'
+      },
+      {
+        id: 'q2',
+        question: 'Choose the correct conditional sentence:',
+        options: [
+          'If I was you, I would study harder.',
+          'If I were you, I would study harder.',
+          'If I am you, I would study harder.',
+          'If I will be you, I would study harder.'
+        ],
+        correctAnswer: 1,
+        explanation: 'In hypothetical conditions, we use "were" for all persons in the subjunctive mood.'
+      },
+      {
+        id: 'q3',
+        question: 'Which preposition is correct?',
+        options: [
+          'I arrived in 3 PM.',
+          'I arrived on 3 PM.',
+          'I arrived at 3 PM.',
+          'I arrived by 3 PM.'
+        ],
+        correctAnswer: 2,
+        explanation: 'We use "at" with specific times (at 3 PM, at noon, at midnight).'
+      }
+    ];
+
+    const vocabularyQuestions: QuizQuestion[] = [
+      {
+        id: 'v1',
+        question: 'What does "serendipity" mean?',
+        options: [
+          'A feeling of sadness',
+          'A pleasant surprise or fortunate accident',
+          'A type of flower',
+          'A mathematical concept'
+        ],
+        correctAnswer: 1,
+        explanation: 'Serendipity means finding something good without looking for it, a happy accident.'
+      },
+      {
+        id: 'v2',
+        question: 'Which word means "using very few words"?',
+        options: [
+          'Verbose',
+          'Eloquent',
+          'Laconic',
+          'Articulate'
+        ],
+        correctAnswer: 2,
+        explanation: 'Laconic means expressing much in few words; brief and clearly expressed.'
+      },
+      {
+        id: 'v3',
+        question: 'What does "ubiquitous" mean?',
+        options: [
+          'Very rare',
+          'Present everywhere',
+          'Extremely large',
+          'Very old'
+        ],
+        correctAnswer: 1,
+        explanation: 'Ubiquitous means present, appearing, or found everywhere.'
+      }
+    ];
+
+    const isGrammar = topic.toLowerCase().includes('grammar');
+    const questions = isGrammar ? grammarQuestions : vocabularyQuestions;
+    
+    return {
+      id: `quiz-${Date.now()}`,
+      title: isGrammar ? 'English Grammar Quiz' : 'Vocabulary Quiz',
+      questions
+    };
+  };
+
+  const generateFlashcards = (topic: string): FlashcardData[] => {
+    const vocabularyCards: FlashcardData[] = [
+      {
+        id: 'fc1',
+        front: 'Serendipity',
+        back: 'A pleasant surprise; finding something good by accident',
+        example: 'Meeting my best friend was pure serendipity - we bumped into each other at a coffee shop.',
+        pronunciation: '/ˌserənˈdipədē/'
+      },
+      {
+        id: 'fc2',
+        front: 'Eloquent',
+        back: 'Fluent and persuasive in speaking or writing',
+        example: 'Her eloquent speech moved the entire audience to tears.',
+        pronunciation: '/ˈeləkwənt/'
+      },
+      {
+        id: 'fc3',
+        front: 'Ubiquitous',
+        back: 'Present, appearing, or found everywhere',
+        example: 'Smartphones have become ubiquitous in modern society.',
+        pronunciation: '/yo͞oˈbikwədəs/'
+      },
+      {
+        id: 'fc4',
+        front: 'Ephemeral',
+        back: 'Lasting for a very short time',
+        example: 'The beauty of cherry blossoms is ephemeral, lasting only a few weeks.',
+        pronunciation: '/əˈfem(ə)rəl/'
+      }
+    ];
+
+    const grammarCards: FlashcardData[] = [
+      {
+        id: 'gc1',
+        front: 'Past Perfect Tense',
+        back: 'Had + past participle. Shows action completed before another past action.',
+        example: 'I had eaten before she arrived.',
+      },
+      {
+        id: 'gc2',
+        front: 'Subjunctive Mood',
+        back: 'Used for hypothetical situations. Use "were" for all persons.',
+        example: 'If I were rich, I would travel the world.',
+      },
+      {
+        id: 'gc3',
+        front: 'Prepositions of Time',
+        back: 'at (specific times), on (days/dates), in (months/years)',
+        example: 'at 3 PM, on Monday, in July',
+      }
+    ];
+
+    const isGrammar = topic.toLowerCase().includes('grammar');
+    return isGrammar ? grammarCards : vocabularyCards;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
@@ -243,10 +389,34 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
     
     // Simulate AI response with ReACT pattern
     setTimeout(() => {
-      const aiResponse: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: `**Thought**: The user asked "${input}". I need to analyze this request and determine the best way to help them with their English learning. Let me consider what specific aspect of English they might need help with and how I can provide the most valuable assistance.
+      const userInput = input.toLowerCase();
+      const isQuizRequest = userInput.includes('quiz') || userInput.includes('test') || userInput.includes('question');
+      const isFlashcardRequest = userInput.includes('flashcard') || userInput.includes('vocabulary') || userInput.includes('word');
+      
+      let quiz: QuizData | undefined;
+      let flashcards: FlashcardData[] | undefined;
+      let responseContent = '';
+
+      if (isQuizRequest) {
+        quiz = generateQuiz(input);
+        responseContent = `**Thought**: The user asked for "${input}". This is a request for a quiz, so I should create an interactive quiz to test their knowledge and provide immediate feedback with explanations.
+
+**Action**: I'll generate a comprehensive ${quiz.title.toLowerCase()} with multiple-choice questions that test understanding and provide detailed explanations for each answer.
+
+**Observation**: Creating interactive quizzes helps reinforce learning through active recall and immediate feedback. This follows the ReACT pattern by reasoning about the educational need, taking action to create the quiz, and observing that this method enhances learning retention.
+
+Perfect! I've created an interactive ${quiz.title.toLowerCase()} for you. Each question includes explanations to help you understand the concepts better. Try answering each question and I'll provide immediate feedback!`;
+      } else if (isFlashcardRequest) {
+        flashcards = generateFlashcards(input);
+        responseContent = `**Thought**: The user asked for "${input}". This is a request for flashcards, so I should create interactive vocabulary cards that include definitions, examples, and pronunciation guides.
+
+**Action**: I'll generate a set of flashcards with advanced vocabulary words, including definitions, example sentences, and pronunciation guides to help with comprehensive learning.
+
+**Observation**: Flashcards are excellent for vocabulary acquisition through spaced repetition and active recall. This ReACT approach helps identify the learning need, create appropriate materials, and observe that this method supports long-term retention.
+
+Excellent! I've created interactive flashcards for you. Click on each card to flip it and see the definition, example sentence, and pronunciation. These cards use spaced repetition principles to help you remember new vocabulary effectively!`;
+      } else {
+        responseContent = `**Thought**: The user asked "${input}". I need to analyze this request and determine the best way to help them with their English learning. Let me consider what specific aspect of English they might need help with and how I can provide the most valuable assistance.
 
 **Action**: I'll provide a comprehensive response that addresses their question while demonstrating English learning techniques. I'll also suggest related activities that could enhance their learning experience.
 
@@ -254,8 +424,16 @@ Be interactive, encouraging, and always follow the Thought-Action-Observation pa
 
 Great question! I'm here to help you with your English learning journey. Whether you need help with vocabulary, grammar, pronunciation, or conversation practice, I can provide personalized assistance using various interactive tools and techniques.
 
-What specific area of English would you like to focus on today?`,
+What specific area of English would you like to focus on today?`;
+      }
+      
+      const aiResponse: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: responseContent,
         createdAt: new Date(),
+        quiz,
+        flashcards,
       };
       
       setMessages(prev => [...prev, aiResponse]);
@@ -495,6 +673,139 @@ What specific area of English would you like to focus on today?`,
                 >
                   {message.content && (
                     <MemoizedMarkdown content={message.content} id={message.id} />
+                  )}
+                  
+                  {/* Render Quiz if present */}
+                  {message.quiz && (
+                    <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-700">
+                      <h3 className="text-lg font-semibold mb-4 text-blue-800 dark:text-blue-200">
+                        🧩 {message.quiz.title}
+                      </h3>
+                      <div className="space-y-4">
+                        {message.quiz.questions.map((question, qIndex) => (
+                          <div key={question.id} className="p-3 bg-white dark:bg-gray-800 rounded-lg shadow-sm">
+                            <h4 className="font-medium mb-3 text-gray-800 dark:text-gray-200">
+                              {qIndex + 1}. {question.question}
+                            </h4>
+                            <div className="space-y-2">
+                              {question.options.map((option, optIndex) => {
+                                const questionKey = `${message.id}-${question.id}`;
+                                const isSelected = selectedAnswers[questionKey] === optIndex;
+                                const isCorrect = optIndex === question.correctAnswer;
+                                const showResult = selectedAnswers[questionKey] !== undefined;
+                                
+                                return (
+                                  <button
+                                    key={optIndex}
+                                    onClick={() => {
+                                      setSelectedAnswers(prev => ({
+                                        ...prev,
+                                        [questionKey]: optIndex
+                                      }));
+                                      setQuizResults(prev => ({
+                                        ...prev,
+                                        [questionKey]: isCorrect
+                                      }));
+                                    }}
+                                    disabled={showResult}
+                                    className={`w-full text-left p-3 rounded-lg border transition-colors ${
+                                      showResult
+                                        ? isCorrect
+                                          ? 'bg-green-100 border-green-300 text-green-800 dark:bg-green-900/20 dark:border-green-600 dark:text-green-200'
+                                          : isSelected
+                                          ? 'bg-red-100 border-red-300 text-red-800 dark:bg-red-900/20 dark:border-red-600 dark:text-red-200'
+                                          : 'bg-gray-100 border-gray-300 text-gray-600 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-400'
+                                        : isSelected
+                                        ? 'bg-blue-100 border-blue-300 text-blue-800 dark:bg-blue-900/20 dark:border-blue-600 dark:text-blue-200'
+                                        : 'bg-gray-50 border-gray-200 hover:bg-gray-100 dark:bg-gray-700 dark:border-gray-600 dark:hover:bg-gray-600'
+                                    }`}
+                                  >
+                                    <span className="flex items-center">
+                                      <span className="w-6 h-6 rounded-full border-2 mr-3 flex items-center justify-center text-xs font-medium">
+                                        {String.fromCharCode(65 + optIndex)}
+                                      </span>
+                                      {option}
+                                      {showResult && isCorrect && (
+                                        <span className="ml-auto text-green-600 dark:text-green-400">✓</span>
+                                      )}
+                                      {showResult && isSelected && !isCorrect && (
+                                        <span className="ml-auto text-red-600 dark:text-red-400">✗</span>
+                                      )}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            {selectedAnswers[`${message.id}-${question.id}`] !== undefined && question.explanation && (
+                              <div className="mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg">
+                                <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                                  <strong>Explanation:</strong> {question.explanation}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Render Flashcards if present */}
+                  {message.flashcards && (
+                    <div className="mt-4 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-700">
+                      <h3 className="text-lg font-semibold mb-4 text-purple-800 dark:text-purple-200">
+                        🃏 Vocabulary Flashcards
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {message.flashcards.map((card) => {
+                          const cardKey = `${message.id}-${card.id}`;
+                          const isFlipped = flippedCards[cardKey] || false;
+                          
+                          return (
+                            <div
+                              key={card.id}
+                              className="relative h-48 cursor-pointer perspective-1000"
+                              onClick={() => {
+                                setFlippedCards(prev => ({
+                                  ...prev,
+                                  [cardKey]: !prev[cardKey]
+                                }));
+                              }}
+                            >
+                              <div className={`relative w-full h-full transition-transform duration-600 transform-style-preserve-3d ${isFlipped ? 'rotate-y-180' : ''}`}>
+                                {/* Front of card */}
+                                <div className="absolute inset-0 w-full h-full backface-hidden bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-600 p-4 flex flex-col justify-center items-center text-center">
+                                  <h4 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-2">
+                                    {card.front}
+                                  </h4>
+                                  {card.pronunciation && (
+                                    <p className="text-sm text-gray-600 dark:text-gray-400 font-mono">
+                                      {card.pronunciation}
+                                    </p>
+                                  )}
+                                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-4">
+                                    Click to flip
+                                  </p>
+                                </div>
+                                
+                                {/* Back of card */}
+                                <div className="absolute inset-0 w-full h-full backface-hidden rotate-y-180 bg-gradient-to-br from-purple-100 to-blue-100 dark:from-purple-900 dark:to-blue-900 rounded-lg shadow-lg border border-gray-200 dark:border-gray-600 p-4 flex flex-col justify-center">
+                                  <p className="text-lg font-medium text-gray-800 dark:text-gray-200 mb-3">
+                                    {card.back}
+                                  </p>
+                                  {card.example && (
+                                    <div className="mt-3 p-2 bg-white/70 dark:bg-gray-800/70 rounded">
+                                      <p className="text-sm text-gray-700 dark:text-gray-300">
+                                        <em>Example:</em> {card.example}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   )}
                   
 
